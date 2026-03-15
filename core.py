@@ -1,20 +1,9 @@
 """
-core.py — Entry point Asta (versi dioptimasi).
+core.py — Entry point Asta (versi dioptimasi v4).
 
-Perubahan utama dari versi sebelumnya:
-  ✓ Startup cepat: config dibaca dari file, tidak ada wizard blocking
-  ✓ Memory loading non-blocking dengan progress yang jelas
-  ✓ Dual-pass inference (internal thought + response)
-  ✓ Web search terintegrasi, hanya aktif jika dibutuhkan
-  ✓ Token budget yang ketat dan benar
-  ✓ Core memory update di background (tidak blocking saat exit)
-  ✓ Episodic memory: key facts extraction tanpa LLM (cepat)
-  ✓ LLM summarization hanya sebagai background update opsional
-
-Jalankan:
-  python core.py           — mode normal
-  python core.py --setup   — reset konfigurasi
-  python core.py --debug   — tampilkan thought pass
+Update:
+  ✓ Panggil extract_and_save_preferences() saat exit
+    agar preferensi user tersimpan ke profil core memory
 """
 
 import sys
@@ -45,7 +34,6 @@ args = parser.parse_args()
 
 cfg = load_config()
 
-# Jalankan setup wizard jika pertama kali atau diminta
 if args.setup or not Path("config.json").exists():
     cfg = setup_wizard(cfg)
 
@@ -55,7 +43,6 @@ if args.setup or not Path("config.json").exists():
 def get_or_set_user_name() -> str:
     current = get_identity("nama_user")
     if current:
-        # Hanya tanya ganti nama, tidak tanya mode/model/dll
         print(f"\nHalo! Aku ingat kamu: {current}")
         change = input("Ganti nama? (y/n, default = n): ").strip().lower()
         if change == "y":
@@ -73,33 +60,38 @@ def get_or_set_user_name() -> str:
 user_name = get_or_set_user_name()
 
 
-# ─── Load Model (Non-Blocking, Sekali) ────────────────────────────────────────
+# ─── Load Model ───────────────────────────────────────────────────────────────
 
 print(f"\n[Startup] Memuat model...")
 chat_manager = load_model(cfg)
 
 
-# ─── Kaitkan Hybrid Memory ke ChatManager ─────────────────────────────────────
+# ─── Kaitkan Hybrid Memory ────────────────────────────────────────────────────
 
 hybrid_mem = get_hybrid_memory()
 chat_manager.hybrid_memory = hybrid_mem
 chat_manager.debug_thought = args.debug
-
-# Injeksi nama user ke system identity
 chat_manager.system_identity += f"\n- Nama pengguna: {user_name}."
+chat_manager._user_name_cache = user_name  # cache agar tidak di-parse ulang tiap pesan
 
 
-# ─── Tampilkan Status Memory ──────────────────────────────────────────────────
+# ─── Status Memory ────────────────────────────────────────────────────────────
 
 print("\n[Memory] Status:")
 core_text = hybrid_mem.core.get_summary()
-ep_count = len(hybrid_mem.episodic.data)
+ep_count = len([s for s in hybrid_mem.episodic.data
+                if not __import__('numpy').allclose(
+                    __import__('numpy').array(s.get("embedding", [0])[:5]), 0.0)])
 if core_text:
     preview = core_text[:80] + "..." if len(core_text) > 80 else core_text
     print(f"  Core : {preview}")
 else:
     print("  Core : (kosong)")
-print(f"  Sesi : {ep_count} sesi episodik tersimpan")
+print(f"  Sesi : {ep_count} sesi valid tersimpan")
+
+profile = hybrid_mem.core.get_profile()
+if profile.get("preferensi"):
+    print(f"  Suka : {', '.join(profile['preferensi'][:3])}")
 
 recent_facts = hybrid_mem.episodic.get_recent_facts_text(n_sessions=3, max_facts=5)
 if recent_facts:
@@ -137,17 +129,19 @@ while True:
     if user_input.lower() == "exit":
         print("\n[Exit] Menyimpan sesi...")
 
-        # ── Simpan ke Episodic Memory (cepat, key facts extraction) ───────
-        # Bangun conversation list dari history
         conversation = [
             {"role": m["role"], "content": m["content"]}
             for m in chat_manager.conversation_history
             if m["content"]
         ]
-        add_episodic(conversation)  # key facts otomatis, tanpa LLM
+
+        # Ekstrak preferensi dan simpan ke profil core memory
+        if conversation:
+            hybrid_mem.extract_and_save_preferences(conversation)
+
+        add_episodic(conversation)
         print("[Exit] Sesi disimpan ke episodic memory.")
 
-        # ── Update Core Memory di Background (tidak blocking) ─────────────
         session_text = chat_manager.get_session_text()
         if session_text:
             print("[Exit] Memperbarui core memory di background...")
@@ -163,8 +157,13 @@ while True:
 
     # Perintah khusus
     if user_input.lower() == "!memory":
-        ctx = hybrid_mem.get_context(max_chars=800)
+        ctx = hybrid_mem.get_context(max_chars=1000)
         print(f"\n[Memory Context]\n{ctx}\n")
+        continue
+
+    if user_input.lower() == "!profile":
+        profile = hybrid_mem.core.get_profile()
+        print(f"\n[Profil Pengguna]\n{profile}\n")
         continue
 
     if user_input.lower() == "!thought":
@@ -181,9 +180,8 @@ while True:
         print(f"[Config] Web search: {status}\n")
         continue
 
-    # Chat normal
     try:
         response = chat_manager.chat(user_input)
-        clean_response(response)  # sudah diprint oleh streaming
+        clean_response(response)
     except Exception as e:
         print(f"[Error] {e}\n")

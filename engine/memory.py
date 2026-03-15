@@ -8,13 +8,10 @@ from .memory_system import SemanticMemory, EpisodicMemory, CoreMemory, HybridMem
 MEMORY_DIR = Path("memory")
 MEMORY_DIR.mkdir(exist_ok=True)
 
-# Instance global
 semantic_memory = SemanticMemory(MEMORY_DIR)
 episodic_memory = EpisodicMemory(MEMORY_DIR)
 core_memory = CoreMemory(MEMORY_DIR)
 hybrid_memory = HybridMemory(episodic=episodic_memory, core=core_memory)
-
-# Simpan referensi semantic ke hybrid agar web_tools bisa akses
 hybrid_memory.semantic = semantic_memory
 
 
@@ -56,5 +53,9 @@ def save_core_memory(text: str):
 def get_hybrid_memory() -> HybridMemory:
     return hybrid_memory
 
-def get_memory_context(query: str = "", max_chars: int = 1200) -> str:
-    return hybrid_memory.get_context(current_query=query, max_chars=max_chars)
+def get_memory_context(query: str = "", recall_topic: str = "", max_chars: int = 1200) -> str:
+    return hybrid_memory.get_context(
+        current_query=query,
+        recall_topic=recall_topic,
+        max_chars=max_chars,
+    )

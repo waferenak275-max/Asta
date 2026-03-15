@@ -18,7 +18,7 @@ DEFAULT_CONFIG = {
     "serper_api_key": "",          # Daftar gratis (2500/bulan) di https://serper.dev/
     "internal_thought_enabled": True,
     "token_budget": {
-        "total_ctx": 8192,
+        "total_ctx": 30000,
         "response_reserved": 512,
         "system_identity": 350,
         "memory_budget": 600,

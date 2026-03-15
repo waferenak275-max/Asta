@@ -1,0 +1,6 @@
+llama-cpp-python
+numpy
+transformers
+torch
+sentencepiece
+accelerate

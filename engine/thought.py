@@ -1,38 +1,43 @@
 """
 engine/thought.py — Internal Thought Engine untuk Asta.
-
-Fix v3:
-  1. Thought pass menerima recent_context (2-3 pesan terakhir)
-     agar query yang dihasilkan relevan dengan topik percakapan aktif,
-     bukan mengarang dari memori secara acak.
-  2. build_augmented_system memberi instruksi eksplisit ketika ada
-     web_result agar model benar-benar menggunakannya, bukan mengabaikannya.
 """
 
 from typing import Optional
 
-# ─── Thought Prompt ────────────────────────────────────────────────────────────
+_THOUGHT_SYSTEM_TEMPLATE = """Kamu adalah sistem analisis input untuk percakapan antara DUA pihak:
+- Asta      : AI perempuan, asisten sekaligus pasangan romantis {user_name}
+- {user_name}: pengguna yang berbicara dengan Asta
 
-_THOUGHT_SYSTEM = """\
-Kamu adalah sistem analisis input. Baca konteks percakapan dan input terbaru,
-lalu tulis SATU analisis.
+PENTING: Dalam input di bawah, "aku" dari user = {user_name}, BUKAN Asta.
+Pertanyaan seperti "aku suka apa", "aku pernah bilang apa" = tentang {user_name}.
 
-ATURAN NEED_SEARCH:
-- yes: user secara eksplisit meminta verifikasi, info faktual terkini, atau
-       menyebut kata seperti "cari", "cek", "verifikasi", "berapa", "siapa",
-       "cuaca", "harga", "kurs", "berita"
-- no : sapaan, obrolan biasa, perasaan, pernyataan umum, pertanyaan retoris
+ATURAN NEED_SEARCH — jawab yes jika SALAH SATU kondisi ini terpenuhi:
+1. {user_name} meminta info faktual dari internet: cuaca, harga, kurs, berita, siapa menjabat
+2. {user_name} menyebut kata "cari", "cek", "verifikasi", "search"
+3. {user_name} menyebut judul lagu, film, buku, anime, game, atau karya spesifik yang
+   mungkin tidak dikenal luas — model harus search untuk memastikan, BUKAN mengarang
+4. {user_name} menanyakan detail tentang karya/topik yang model tidak yakin 100% kebenarannya
 
-Jika NEED_SEARCH yes, buat SEARCH_QUERY yang spesifik berdasarkan
-TOPIK PERCAKAPAN TERKINI (bukan dari memori atau asumsi sendiri).
+Jika ragu apakah model benar-benar tahu → pilih yes dan search.
 
-FORMAT WAJIB (berhenti tepat setelah NOTE, tidak ada teks lain):
+ATURAN RECALL_TOPIC:
+- Isi HANYA jika topiknya pernah dibahas di percakapan sebelumnya dengan {user_name}
+- WAJIB gunakan nama "{user_name}" jika topiknya tentang user
+- Benar : "minuman favorit {user_name}", "rencana {user_name} ke Bali"
+- Salah : "minuman favorit Asta" (kecuali tentang Asta)
+- DILARANG: mengisi RECALL_TOPIC dengan fakta yang dikarang/diasumsikan sendiri
+- Kosongkan jika tidak ada ingatan nyata yang perlu dipanggil
+
+FORMAT WAJIB (berhenti tepat setelah NOTE):
 NEED_SEARCH: yes/no
-SEARCH_QUERY: <query spesifik sesuai topik percakapan, kosong jika no>
-RECALL_TOPIC: <topik memori relevan, kosong jika tidak ada>
+SEARCH_QUERY: <query internet jika yes, kosong jika no>
+RECALL_TOPIC: <topik ingatan nyata dari percakapan, kosong jika tidak ada>
 TONE: romantic/casual/informative
 NOTE: <catatan singkat maks 10 kata>\
 """
+
+# Diisi dengan user_name saat runtime
+_THOUGHT_SYSTEM = _THOUGHT_SYSTEM_TEMPLATE
 
 _STOP_TOKENS = ["\n\n", "---", "Input pengguna:", "Analisis:", "</thought>", "###"]
 
@@ -41,32 +46,29 @@ def run_thought_pass(
     llm,
     user_input: str,
     memory_context: str,
-    recent_context: str = "",   # ← BARU: 2-3 pesan terakhir sebagai konteks
+    recent_context: str = "",
     web_search_enabled: bool = True,
-    max_tokens: int = 80,
+    max_tokens: int = 100,
+    user_name: str = "Aditiya",  # ← nama user untuk konteks identitas
 ) -> dict:
-    """
-    Model memutuskan apakah perlu search berdasarkan:
-    - recent_context: topik percakapan yang sedang berlangsung
-    - user_input: input terbaru user
-    Bukan dari memori atau asumsi sendiri.
-    """
+    # Isi template dengan nama user agar thought tahu siapa lawan bicaranya
+    thought_system = _THOUGHT_SYSTEM_TEMPLATE.format(user_name=user_name)
+
     mem_hint = ""
     if memory_context:
         first_line = memory_context.strip().splitlines()[0]
         mem_hint = first_line[:100]
 
-    # recent_context memberikan topik aktif percakapan ke thought pass
     context_block = ""
     if recent_context:
         context_block = f"Konteks percakapan terkini:\n{recent_context}\n\n"
 
     prompt = (
-        f"{_THOUGHT_SYSTEM}\n\n"
+        f"{thought_system}\n\n"
         f"Hint memori: {mem_hint or '(kosong)'}\n"
         f"Web search: {'tersedia' if web_search_enabled else 'tidak tersedia'}\n\n"
         f"{context_block}"
-        f"Input terbaru: \"{user_input}\"\n\n"
+        f"Input {user_name}: \"{user_input}\"\n\n"
         f"NEED_SEARCH:"
     )
 
@@ -89,7 +91,6 @@ def run_thought_pass(
 
 
 def _parse_thought(raw: str) -> dict:
-    """Parse output thought — berhenti setelah NOTE pertama."""
     result = {
         "need_search": False,
         "search_query": "",
@@ -116,7 +117,9 @@ def _parse_thought(raw: str) -> dict:
         elif key == "SEARCH_QUERY":
             result["search_query"] = val.strip('"').strip("'")
         elif key == "RECALL_TOPIC":
-            result["recall_topic"] = val
+            # Normalisasi: kosong jika "kosong" atau "-"
+            clean_val = val.strip('"').strip("'")
+            result["recall_topic"] = "" if clean_val.lower() in ("kosong", "-", "") else clean_val
         elif key == "TONE":
             result["tone"] = val.lower()
         elif key == "NOTE":
@@ -132,10 +135,6 @@ def build_augmented_system(
     memory_context: str,
     web_result: str = "",
 ) -> str:
-    """
-    Bangun system prompt augmented untuk response pass.
-    Jika ada web_result, beri instruksi eksplisit agar model benar-benar memakainya.
-    """
     parts = [base_system]
 
     if memory_context:
@@ -143,7 +142,6 @@ def build_augmented_system(
 
     if web_result:
         if web_result.startswith("[INFO]"):
-            # Fetch gagal
             parts.append(
                 "\n[Instruksi Penting] Web search gagal. "
                 "JANGAN mengarang data. Beritahu user dengan jujur bahwa "
@@ -151,12 +149,10 @@ def build_augmented_system(
                 "cek sendiri di sumber terpercaya."
             )
         else:
-            # Ada hasil — instruksikan model untuk MENGGUNAKAN hasil ini
             parts.append(
                 f"\n[Hasil Web Search]\n{web_result[:600]}\n"
                 "[Instruksi Penting] Gunakan informasi dari web search di atas "
-                "sebagai dasar jawabanmu. Jangan mengabaikannya atau mengganti "
-                "dengan pengetahuan sendiri. Sebutkan sumber jika relevan."
+                "sebagai dasar jawabanmu. Jangan mengabaikannya."
             )
 
     if thought.get("note"):
@@ -170,20 +166,15 @@ def build_augmented_system(
     return "".join(parts)
 
 
-# ─── Helper: Ekstrak Recent Context ───────────────────────────────────────────
+# ─── Helper ───────────────────────────────────────────────────────────────────
 
 def extract_recent_context(conversation_history: list, n: int = 3) -> str:
-    """
-    Ambil N pesan terakhir dari conversation_history sebagai konteks topik aktif.
-    Dipakai untuk memberi thought pass konteks percakapan yang sedang berlangsung.
-    """
     recent = conversation_history[-n:] if len(conversation_history) >= n else conversation_history
     lines = []
     for msg in recent:
         role = "Kamu" if msg["role"] == "user" else "Asta"
         content = msg["content"]
         if content:
-            # Potong jika terlalu panjang
             lines.append(f"{role}: {content[:120]}")
     return "\n".join(lines)
 
@@ -204,7 +195,8 @@ def format_thought_debug(thought: dict, web_result: str = "") -> str:
     lines.append(f"│  Search  : {'✓ akan search' if thought['need_search'] else '✗ tidak perlu'}")
     if thought["need_search"] and thought.get("search_query"):
         lines.append(f"│  Query   : {thought['search_query']}")
-    lines.append(f"│  Recall  : {thought.get('recall_topic') or '–'}")
+    recall = thought.get("recall_topic") or "–"
+    lines.append(f"│  Recall  : {recall}")
     lines.append(f"│  Tone    : {thought.get('tone', '–')}")
     lines.append(f"│  Note    : {thought.get('note') or '–'}")
 
