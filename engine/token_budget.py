@@ -60,38 +60,36 @@ class TokenBudgetManager:
         CATATAN: conversation_history HARUS hanya berisi role:user dan role:assistant.
         Jangan pernah menyimpan role:system di conversation_history.
         """
-        # Hitung token system_identity dulu
-        used_tokens = self.count_fn([system_identity])
-
-        # Hitung token dynamic_context jika ada
-        dynamic_cost = 0
-        if dynamic_context:
-            dynamic_cost = self.count_fn([dynamic_context])
-
-        # Budget tersisa untuk conversation history
-        conv_budget = self.budget.available_total - used_tokens - dynamic_cost
-
         # Filter: hanya user & assistant, bersih dari system
         clean_history = [
             m for m in conversation_history
             if m.get("role") in ("user", "assistant") and m.get("content")
         ]
 
-        # Ambil dari belakang sesuai budget
+        # Ambil dari belakang sesuai budget DENGAN hitung token penuh (akurasi lebih baik).
+        # NOTE: count_fn menambahkan suffix assistant setiap kali dipanggil,
+        # jadi hitung per-pesan bisa over-estimate. Gunakan evaluasi incremental
+        # pada keseluruhan prompt agar keputusan trimming lebih presisi.
+        max_prompt_tokens = self.budget.available_total
         selected = []
+
+        def _build_prompt(msgs: List[Dict]) -> List[Dict]:
+            result = [system_identity] + msgs
+            if dynamic_context:
+                result.append(dynamic_context)
+            return result
+
         for msg in reversed(clean_history):
-            cost = self.count_fn([msg])
-            if conv_budget - cost >= 0:
-                selected.insert(0, msg)
-                conv_budget -= cost
+            trial_selected = [msg] + selected
+            trial_prompt = _build_prompt(trial_selected)
+            if self.count_fn(trial_prompt) <= max_prompt_tokens:
+                selected = trial_selected
             else:
                 break
 
         # Susun: [system] + [conversation...] + [dynamic_context]
         # dynamic_context DI AKHIR agar tidak memutus cache conversation
-        result = [system_identity] + selected
-        if dynamic_context:
-            result.append(dynamic_context)
+        result = _build_prompt(selected)
 
         total = self.count_fn(result)
         return result, total
