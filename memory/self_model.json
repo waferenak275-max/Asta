@@ -12,14 +12,14 @@
     ]
   },
   "emotional_state": {
-    "current_emotion": "netral",
+    "current_emotion": "senang",
     "current_intensity": "sedang",
     "mood": "senang",
-    "mood_score": 0.5766,
-    "affection_level": 0.72,
-    "energy_level": 0.9629,
+    "mood_score": 0.5636,
+    "affection_level": 0.8757,
+    "energy_level": 1.0,
     "trigger": "netral",
-    "updated_at": "2026-03-16T17:37:11.499230",
+    "updated_at": "2026-03-16T21:27:30.898935",
     "last_updated": ""
   },
   "preferences": {
