@@ -153,10 +153,27 @@ class ChatManager:
         """
         parts = [f"Tgl: {timestamp_str}."]
         thought = thought or {}
+        should_prioritize_memory = bool(thought.get("use_memory") or thought.get("recall_topic"))
 
-        # Batasi memori & web lebih ketat untuk kecepatan (total ~150-200 token)
+        # Batasi memori & web ketat untuk kecepatan, tapi longgarkan jika recall diminta.
         if memory_ctx:
-            parts.append(f"\n[Memori]\n{memory_ctx[:180]}")
+            mem_limit = 520 if should_prioritize_memory else 180
+            chosen_memory = memory_ctx
+
+            if should_prioritize_memory:
+                # Prioritaskan blok ingatan eksplisit agar tidak terpotong oleh ringkasan lain.
+                key_markers = ["[Ingatan:", "[Memori Relevan]"]
+                selected = ""
+                for marker in key_markers:
+                    idx = memory_ctx.find(marker)
+                    if idx != -1:
+                        selected = memory_ctx[idx:]
+                        break
+                if selected:
+                    prefix = memory_ctx[:120].strip()
+                    chosen_memory = f"{selected}\n\n[Ringkas Memori]\n{prefix}" if prefix else selected
+
+            parts.append(f"\n[Memori]\n{chosen_memory[:mem_limit]}")
         # if memory_ctx and (thought.get("recall_topic") or thought.get("use_memory")):        
         #     parts.append(f"Mem: {memory_ctx[:180]}")
         if web_result:
