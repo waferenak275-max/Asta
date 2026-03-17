@@ -433,7 +433,7 @@ def load_model(cfg: dict) -> ChatManager:
     elif thought_ok:
         n_ctx_thought   = cfg.get("thought_n_ctx", 3072)
         n_batch_thought = min(n_batch, 512)
-        print(f"\n[Model Thought] Memuat Sailor2 3B (n_ctx={n_ctx_thought})...")
+        print(f"\n[Model Thought] Memuat Qwen2.5 3B (n_ctx={n_ctx_thought})...")
         llama_thought = _load_llama(
             model_path=thought_cfg["model_path"],
             tokenizer_path=thought_cfg["tokenizer_path"],
