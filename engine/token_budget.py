@@ -24,11 +24,7 @@ class TokenBudgetManager:
         dynamic_context: Optional[Dict] = None,
         **kwargs
     ) -> tuple:
-        """
-        Strategi Ghost Context: 
-        [System] + [History] + [Dynamic Context]
-        Dynamic context diletakkan di akhir dan TIDAK disimpan di history permanen.
-        """
+
         used_tokens = self.count_fn([system_identity])
         dynamic_cost = self.count_fn([dynamic_context]) if dynamic_context else 0
         conv_budget = self.budget.available_total - used_tokens - dynamic_cost
@@ -47,7 +43,6 @@ class TokenBudgetManager:
             else:
                 break
 
-        # URUTAN KRUSIAL: Identitas -> Riwayat Bersih -> Konteks Dinamis (di akhir)
         final_messages = [system_identity] + selected_history
         if dynamic_context:
             final_messages.append(dynamic_context)

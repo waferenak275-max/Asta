@@ -64,7 +64,7 @@ def _load_llama(model_path, tokenizer_path, n_ctx, n_batch,
             use_mmap=True,
             use_mlock=True,
             n_ctx=n_ctx,
-            verbose=True,
+            verbose=False,
             lora_path=lora_path,
             lora_scale=lora_scale,
             lora_n_gpu_layers=0,
@@ -106,7 +106,6 @@ class ChatManager:
         self.emotion_manager = EmotionStateManager()
         self.self_model      = SelfModel()
 
-        # Sinkronkan emosi tersimpan
         saved = self.self_model.get_emotion()
         if saved.get("affection_level"):
             asta = self.emotion_manager.get_asta_state()
@@ -132,7 +131,6 @@ class ChatManager:
         )
 
     def _clean_conversation(self) -> list:
-        """Kembalikan history bersih — hanya role:user dan role:assistant."""
         return [
             {"role": m["role"], "content": m["content"]}
             for m in self.conversation_history
@@ -148,17 +146,13 @@ class ChatManager:
         thought_note: str,
         thought: dict = None,
     ) -> dict:
-        """
-        Bangun pesan context dinamis yang ringkas.
-        """
+
         parts = [f"Tgl: {timestamp_str}."]
         thought = thought or {}
 
-        # Batasi memori & web lebih ketat untuk kecepatan (total ~150-200 token)
         if memory_ctx:
             parts.append(f"\n[Memori]\n{memory_ctx[:1080]}")
-        # if memory_ctx and (thought.get("recall_topic") or thought.get("use_memory")):        
-        #     parts.append(f"Mem: {memory_ctx[:180]}")
+
         if web_result:
             if not web_result.startswith("[INFO]"):
                 parts.append(f"\n[Web]\n{web_result[:250]}")
@@ -166,13 +160,9 @@ class ChatManager:
         if emotion_guidance:
             emo_line = emotion_guidance.split("\n")[-1]
             parts.append(f"Emo: {emo_line}")
+            
         if thought_note:
             parts.append(f"\n[Catatan]\n{thought_note}")
-
-        # self_ctx = self.self_model.get_full_context()
-        # if self_ctx:
-        #     # Batasi context self-model agar sangat ringkas.
-        #     parts.append(f"\n{self_ctx[:150]}")
 
         if thought.get("should_express"):
             self_ctx = self.self_model.get_full_context()
@@ -221,6 +211,7 @@ class ChatManager:
                     f"tren={em_dict['trend']}"
                 ),
                 asta_state=self.emotion_manager.get_asta_dict(),
+                cfg=self.cfg,
             )
             em_dict = self.emotion_manager.refine_with_thought(thought)
 

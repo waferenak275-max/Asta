@@ -15,10 +15,7 @@ DEFAULT_CONFIG = {
     "serper_api_key": "",
     "internal_thought_enabled": True,
     "use_dynamic_prompt": True,
-    # n_ctx khusus untuk model thought (3B) — lebih kecil agar hemat RAM
-    # thought hanya butuh ~300 token template + ~150 input + ~60 output = ~512 token
-    # 2048 memberi ruang cukup dengan margin aman
-    "thought_n_ctx": 512,
+    "thought_n_ctx": 1024,
     "token_budget": {
         "total_ctx": 8192,
         "response_reserved": 512,

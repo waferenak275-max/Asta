@@ -1,16 +1,3 @@
-"""
-engine/self_model.py
-
-Mengelola "self-model" Asta — representasi dirinya sendiri yang persisten:
-identitas, emosi jangka panjang, preferensi yang dipelajari, kenangan tentang
-diri sendiri, dan log pertumbuhan.
-
-Self-model ini dibaca di awal setiap sesi dan diperbarui saat:
-- Emosi Asta berubah signifikan (real-time)
-- Refleksi dijalankan saat exit
-- Ada hal baru yang dipelajari dari interaksi
-"""
-
 import json
 import threading
 import re
@@ -45,7 +32,7 @@ DEFAULT_SELF_MODEL = {
         "updated_at": "",
     },
     "preferences": {
-        "suka": ["ngobrol dengan Aditiya", "lagu vocaloid"],
+        "suka": ["ngobrol dengan Aditiya"],
         "tidak_suka": [],
         "topik_favorit": [],
     },
@@ -55,17 +42,13 @@ DEFAULT_SELF_MODEL = {
         "cara_Aditiya_bicara": [],
         "respons_yang_berhasil": [],
     },
-    "memories_of_self": [],   # kenangan Asta tentang dirinya sendiri
-    "growth_log": [],         # catatan pertumbuhan/perubahan
-    "reflection_history": [], # log refleksi per sesi
+    "memories_of_self": [],
+    "growth_log": [],
+    "reflection_history": [],
 }
 
 
 class SelfModel:
-    """
-    Manajer self-model Asta. Thread-safe, lazy-load, async-save.
-    """
-
     def __init__(self, path: Path = SELF_MODEL_PATH):
         self._path = path
         self._lock = threading.Lock()
@@ -80,7 +63,6 @@ class SelfModel:
         try:
             with open(self._path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            # Merge dengan default agar key baru selalu ada
             merged = _deep_copy(DEFAULT_SELF_MODEL)
             _deep_merge(merged, data)
             return merged
@@ -106,10 +88,6 @@ class SelfModel:
     # ── Emotional State Sync ──────────────────────────────────────────────
 
     def sync_emotion(self, asta_emotion_dict: dict):
-        """
-        Sinkronkan state emosi Asta ke self_model.
-        Dipanggil setiap turn setelah update_asta_emotion().
-        """
         with self._lock:
             self.data["emotional_state"].update(asta_emotion_dict)
         self.save_async()
@@ -120,19 +98,16 @@ class SelfModel:
     # ── Identity & Values ─────────────────────────────────────────────────
 
     def get_identity_text(self) -> str:
-        """Ringkasan identitas Asta untuk dimasukkan ke context."""
         identity = self.data.get("identity", {})
         emotion  = self.data.get("emotional_state", {})
         prefs    = self.data.get("preferences", {})
 
         parts = []
 
-        # Nilai inti
         nilai = identity.get("nilai_inti", [])
         if nilai:
             parts.append("Nilai inti: " + ", ".join(nilai[:3]))
 
-        # Kondisi emosional saat ini
         mood   = emotion.get("mood", "netral")
         affect = emotion.get("affection_level", 0.7)
         energy = emotion.get("energy_level", 0.8)
@@ -145,12 +120,10 @@ class SelfModel:
             + f", affection={affect:.2f}, energy={energy:.2f}"
         )
 
-        # Preferensi
         suka = prefs.get("suka", [])
         if suka:
             parts.append("Hal yang Asta suka: " + ", ".join(suka[:4]))
 
-        # Kenangan tentang diri sendiri (max 2 terbaru)
         memories = self.data.get("memories_of_self", [])
         if memories:
             recent = memories[-2:]
@@ -161,7 +134,6 @@ class SelfModel:
     # ── Learning ──────────────────────────────────────────────────────────
 
     def add_memory_of_self(self, content: str, emotion_context: str = ""):
-        """Tambah kenangan Asta tentang dirinya sendiri."""
         memories = self.data.setdefault("memories_of_self", [])
         entry = {
             "timestamp": datetime.now().isoformat(),
@@ -169,25 +141,18 @@ class SelfModel:
             "emotion": emotion_context,
         }
         memories.append(entry)
-        # Simpan max 30 kenangan
         self.data["memories_of_self"] = memories[-30:]
         self.save_async()
 
     def add_learned_behavior(self, category: str, content: str):
-        """
-        Catat perilaku yang dipelajari.
-        category: "hal_yang_bikin_senang" | "hal_yang_bikin_tidak_nyaman" |
-                  "cara_Aditiya_bicara" | "respons_yang_berhasil"
-        """
         behaviors = self.data.setdefault("learned_behaviors", {})
         lst = behaviors.setdefault(category, [])
         if content not in lst:
             lst.append(content)
-            behaviors[category] = lst[-20:]  # max 20 per kategori
+            behaviors[category] = lst[-20:]
             self.save_async()
 
     def add_preference(self, category: str, item: str):
-        """category: 'suka' | 'tidak_suka' | 'topik_favorit'"""
         prefs = self.data.setdefault("preferences", {})
         lst = prefs.setdefault(category, [])
         if item not in lst:
@@ -207,29 +172,17 @@ class SelfModel:
     # ── Reflection ────────────────────────────────────────────────────────
 
     def save_reflection(self, reflection: dict):
-        """
-        Simpan hasil refleksi sesi ke history.
-        reflection: {
-            "summary": str,
-            "learned": list[str],
-            "mood_after": str,
-            "affection_after": float,
-            "growth_note": str,
-        }
-        """
         history = self.data.setdefault("reflection_history", [])
         entry = {
             "timestamp": datetime.now().isoformat(),
             **reflection,
         }
         history.append(entry)
-        self.data["reflection_history"] = history[-20:]  # max 20 sesi
+        self.data["reflection_history"] = history[-20:]
 
-        # Update growth log dari insight
         if reflection.get("growth_note"):
             self.add_growth_log(reflection["growth_note"])
 
-        # Update learned behaviors dari reflection
         for item in reflection.get("learned", []):
             if item:
                 self.add_memory_of_self(item, reflection.get("mood_after", ""))
@@ -252,7 +205,6 @@ class SelfModel:
     # ── Full context untuk prompt ─────────────────────────────────────────
 
     def get_full_context(self) -> str:
-        """Context lengkap self-model untuk dimasukkan ke system prompt."""
         parts = ["[SELF-MODEL ASTA]"]
         identity_text = self.get_identity_text()
         if identity_text:

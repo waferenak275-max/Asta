@@ -12,19 +12,18 @@
     ]
   },
   "emotional_state": {
-    "current_emotion": "netral",
-    "current_intensity": "sedang",
-    "mood": "senang",
-    "mood_score": 0.4445,
-    "affection_level": 0.9295,
-    "energy_level": 0.927,
-    "trigger": "tanggapan terhadap permintaan flag point",
-    "updated_at": "2026-03-17T17:02:45.089002"
+    "current_emotion": "sedih",
+    "current_intensity": "tinggi",
+    "mood": "sangat murung",
+    "mood_score": -0.7396,
+    "affection_level": 0.9417,
+    "energy_level": 0.714,
+    "trigger": "flag point",
+    "updated_at": "2026-03-18T01:57:09.154001"
   },
   "preferences": {
     "suka": [
-      "ngobrol dengan Aditiya",
-      "lagu vocaloid"
+      "ngobrol dengan Aditiya"
     ],
     "tidak_suka": [],
     "topik_favorit": []

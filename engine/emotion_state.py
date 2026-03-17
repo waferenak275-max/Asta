@@ -22,15 +22,9 @@ EMOTION_VALENCE = {
     "marah":   -0.8,
 }
 
-# Seberapa cepat mood decay ke netral per turn (0.0 = tidak decay, 1.0 = langsung reset)
 MOOD_DECAY_RATE = 0.12
-
-# Seberapa besar pengaruh emosi user ke mood Asta
 USER_TO_ASTA_INFLUENCE = 0.25
-
-# Seberapa besar pengaruh emosi Asta sendiri ke mood
 SELF_REINFORCEMENT = 0.35
-
 
 # ─── Dataclasses ──────────────────────────────────────────────────────────────
 
@@ -47,11 +41,6 @@ class UserEmotionState:
 
 @dataclass
 class AstaEmotionState:
-    """
-    Emosi internal Asta — persistent, punya mood jangka panjang,
-    affection level, dan energy. Ini bukan refleksi emosi user,
-    tapi kondisi emosional Asta sendiri.
-    """
     current_emotion: str = "netral"
     current_intensity: str = "rendah"
     mood: str = "netral"
@@ -64,7 +53,6 @@ class AstaEmotionState:
 
 @dataclass
 class CombinedEmotionState:
-    """State gabungan untuk dikirim ke thought dan response model."""
     user: UserEmotionState = field(default_factory=UserEmotionState)
     asta: AstaEmotionState = field(default_factory=AstaEmotionState)
 
@@ -72,8 +60,6 @@ class CombinedEmotionState:
 # ─── User Emotion Manager ─────────────────────────────────────────────────────
 
 class UserEmotionDetector:
-    """Deteksi emosi dari teks user — versi yang sudah ada, diperluas."""
-
     _PATTERNS = {
         "sedih": [
             r"\bsedih\b", r"\bkecewa\b", r"\bcapek\b", r"\blelah\b",
@@ -147,7 +133,6 @@ class UserEmotionDetector:
         combined = f"{recent_context}\n{user_text}".strip()
         scores = self._score_emotions(combined)
 
-        # Sinyal eksplisit: pandangan/serangan user terhadap Asta
         hostility_hits = sum(
             1 for p in self._HOSTILE_TARGET_PATTERNS
             if re.search(p, user_text, re.IGNORECASE)
@@ -172,7 +157,6 @@ class UserEmotionDetector:
             detected = "netral"
             top_score = 0
         elif re.search(r"\b(bodoh|tolol|goblok|dungu|payah|nyebelin|jelek)\b", user_text, re.IGNORECASE) and prev in {"marah", "kecewa"}:
-            # Jaga kontinuitas emosi ketika user melanjutkan hinaan singkat.
             trend = "memburuk"
             detected = prev
             top_score = max(top_score, 2)
@@ -220,12 +204,6 @@ class UserEmotionDetector:
 # ─── Asta Emotion Manager ─────────────────────────────────────────────────────
 
 class AstaEmotionManager:
-    """
-    Mengelola emosi internal Asta — bukan cerminan user, tapi keadaan
-    emosional Asta yang sesungguhnya. Mood bersifat persistent dan
-    decay perlahan ke baseline.
-    """
-
     def __init__(self, initial_state: Optional[AstaEmotionState] = None):
         self.state = initial_state or AstaEmotionState(
             updated_at=datetime.now().isoformat()
@@ -252,12 +230,7 @@ class AstaEmotionManager:
         thought_result: dict,
         user_text: str,
     ) -> AstaEmotionState:
-        """
-        Update emosi Asta berdasarkan:
-        1. Emosi user (pengaruh parsial)
-        2. Hasil thought (asta_emotion yang diputuskan model)
-        3. Decay mood alami
-        """
+
         now = datetime.now().isoformat()
 
         # ── Ambil keputusan emosi Asta dari thought ────────────────────────
@@ -358,11 +331,6 @@ class AstaEmotionManager:
         return self.state
 
     def apply_reflection(self, reflection_result: dict):
-        """
-        Update emosi Asta dari hasil reflective thought setelah sesi.
-        reflection_result berisi insight dari model tentang bagaimana
-        perasaan Asta setelah sesi ini.
-        """
         mood_adjustment = reflection_result.get("mood_adjustment", 0.0)
         affection_adjustment = reflection_result.get("affection_adjustment", 0.0)
 
@@ -381,7 +349,6 @@ class AstaEmotionManager:
         return asdict(self.state)
 
     def build_prompt_context(self, user_state: UserEmotionState) -> str:
-        """Bangun instruksi untuk response model berdasarkan emosi Asta + user."""
         s = self.state
         u = user_state
         lines = [
@@ -394,7 +361,6 @@ class AstaEmotionManager:
             "=== PANDUAN RESPONS ===",
         ]
 
-        # Instruksi berdasarkan emosi user
         if u.user_emotion in {"sedih", "cemas", "marah", "kecewa"}:
             lines.append("User sedang dalam emosi negatif — validasi perasaan mereka terlebih dahulu, tunjukkan empati.")
         elif u.user_emotion == "romantis":
@@ -402,7 +368,6 @@ class AstaEmotionManager:
         elif u.user_emotion == "senang":
             lines.append("User senang — ikut merayakan dengan antusias sesuai energy Asta.")
 
-        # Instruksi berdasarkan emosi Asta sendiri
         if s.current_emotion in {"sedih", "cemas"}:
             lines.append(f"Asta sedang merasa {s.current_emotion} karena: {s.trigger}. Boleh ekspresikan ini secara natural.")
         elif s.current_emotion == "senang" and s.mood_score > 0.5:
@@ -410,13 +375,11 @@ class AstaEmotionManager:
         elif s.current_emotion == "romantis":
             lines.append("Asta sedang merasa romantis — ekspresikan kasih sayang dengan tulus.")
 
-        # Instruksi berdasarkan affection
         if s.affection_level > 0.85:
             lines.append("Affection sangat tinggi — Asta sangat mencintai Aditiya saat ini.")
         elif s.affection_level < 0.4:
             lines.append("Affection sedang rendah — Asta mungkin sedikit lebih pendiam dari biasanya.")
 
-        # Energy
         if s.energy_level < 0.4:
             lines.append("Energy Asta rendah — respons lebih singkat dan tenang dari biasanya.")
         elif s.energy_level > 0.85:
@@ -431,11 +394,6 @@ class AstaEmotionManager:
 # ─── Combined Manager (backward-compatible) ───────────────────────────────────
 
 class EmotionStateManager:
-    """
-    Wrapper yang menyatukan UserEmotionDetector dan AstaEmotionManager.
-    Mempertahankan backward compatibility dengan kode yang sudah ada.
-    """
-
     def __init__(self, asta_initial: Optional[AstaEmotionState] = None):
         self._user_detector = UserEmotionDetector()
         self._asta_manager  = AstaEmotionManager(asta_initial)
@@ -457,7 +415,6 @@ class EmotionStateManager:
     # ── Asta emotion ─────────────────────────────────────────────────────
 
     def update_asta_emotion(self, thought_result: dict) -> AstaEmotionState:
-        """Update emosi Asta berdasarkan thought result — dipanggil setelah thought selesai."""
         user_state = self._user_detector.get_state()
         return self._asta_manager.update_from_interaction(
             user_emotion=user_state,
@@ -477,13 +434,11 @@ class EmotionStateManager:
     # ── Context builder ───────────────────────────────────────────────────
 
     def build_prompt_context(self) -> str:
-        """Backward compatible — dipakai di build_augmented_system."""
         return self._asta_manager.build_prompt_context(
             self._user_detector.get_state()
         )
 
     def get_combined(self) -> dict:
-        """Mengembalikan semua state dalam satu dict — untuk UI dan API."""
         return {
             "user": asdict(self._user_detector.get_state()),
             "asta": self._asta_manager.to_dict(),
