@@ -11,7 +11,7 @@ DEFAULT_CONFIG = {
     "memory_mode": "hybrid",
     "web_search_enabled": True,
     "n_batch": 1024,
-    "tavily_api_key": "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",
+    "tavily_api_key": "",
     "serper_api_key": "",
     "internal_thought_enabled": True,
     "use_dynamic_prompt": True,
