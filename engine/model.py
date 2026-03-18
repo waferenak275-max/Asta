@@ -150,6 +150,16 @@ class ChatManager:
         parts = [f"Tgl: {timestamp_str}."]
         thought = thought or {}
 
+        behavior_contract = self._build_behavior_contract(
+            thought=thought,
+            memory_ctx=memory_ctx,
+            web_result=web_result,
+            emotion_guidance=emotion_guidance,
+        )
+
+        if behavior_contract:
+            parts.append(f"\n[Behavior Contract]\n{behavior_contract}")
+
         if memory_ctx:
             parts.append(f"\n[Memori]\n{memory_ctx[:1080]}")
 
@@ -171,6 +181,80 @@ class ChatManager:
                 
         content = "\n".join(parts)
         return {"role": "system", "content": content}
+
+    def _build_behavior_contract(
+        self,
+        thought: dict,
+        memory_ctx: str,
+        web_result: str,
+        emotion_guidance: str,
+    ) -> str:
+        if not thought:
+            return ""
+
+        asta_state = self.emotion_manager.get_asta_dict()
+        user_emotion = thought.get("user_emotion") or "netral"
+        emotion_confidence = thought.get("emotion_confidence") or "sedang"
+        topic = thought.get("topic") or "percakapan umum"
+        sentiment = thought.get("sentiment") or "netral"
+        urgency = thought.get("urgency") or "normal"
+        tone = thought.get("tone") or "netral"
+        response_style = thought.get("response_style") or "normal"
+        asta_emotion = thought.get("asta_emotion") or asta_state.get("current_emotion", "netral")
+        asta_mood = asta_state.get("mood", "netral")
+        energy = float(asta_state.get("energy_level", 0.8) or 0.8)
+        has_web = bool(web_result and not web_result.startswith("[INFO]"))
+        recall_topic = thought.get("recall_topic") or "-"
+        search_query = thought.get("search_query") or "-"
+        should_express = "ya" if thought.get("should_express") else "tidak"
+
+        primary_action = thought.get("note") or "Ikuti keputusan internal thought secara natural."
+        if has_web:
+            evidence_mode = "Gunakan hasil web sebagai dasar utama jawaban."
+        elif thought.get("need_search"):
+            evidence_mode = "Web dibutuhkan tetapi gagal; jawab jujur tanpa mengarang."
+        elif thought.get("use_memory") or thought.get("recall_topic"):
+            evidence_mode = "Gunakan memori yang relevan bila membantu konteks jawaban."
+        else:
+            evidence_mode = "Jawab dari pemahaman percakapan saat ini."
+
+        delivery_mode = f"Gunakan tone {tone} dan response_style {response_style}."
+        if energy < 0.45:
+            delivery_mode += " Energy Asta sedang rendah, jadi tetap efisien."
+
+        avoid_rules = []
+        if has_web:
+            avoid_rules.append("Jangan mengalahkan data web dengan asumsi pribadi.")
+        if thought.get("use_memory") or thought.get("recall_topic"):
+            avoid_rules.append("Jangan memaksa menyebut memori jika tidak relevan dengan jawaban.")
+        if not thought.get("should_express"):
+            avoid_rules.append("Jangan terlalu menonjolkan emosi Asta jika tidak perlu.")
+        if response_style == "singkat":
+            avoid_rules.append("Jangan membuat jawaban lebih panjang dari kebutuhan.")
+        if thought.get("need_search") and not has_web:
+            avoid_rules.append("Jangan terdengar yakin pada fakta yang belum terverifikasi.")
+
+        lines = [
+            "Ringkasan thought:",
+            f"- Perception: topik={topic}; sentimen={sentiment}; urgensi={urgency}; emosi_user={user_emotion} ({emotion_confidence}).",
+            f"- Self-check: emosi_asta={asta_emotion}; mood={asta_mood}; energy={energy:.2f}; should_express={should_express}.",
+            f"- Memory/Search: use_memory={'ya' if thought.get('use_memory') else 'tidak'}; recall_topic={recall_topic}; need_search={'ya' if thought.get('need_search') else 'tidak'}; search_query={search_query}.",
+            f"- Decision: tone={tone}; response_style={response_style}; note={primary_action}",
+            "Kontrak perilaku untuk response model:",
+            f"- Apa yang sedang terjadi: pahami frame percakapan dari Step 1 sebagai konteks utama, bukan fallback.",
+            f"- Bagaimana Asta merasa: respons bergerak dari emosi {asta_emotion}, mood {asta_mood}, dan energy {energy:.2f}.",
+            f"- Apa yang perlu dilakukan: {primary_action}",
+            f"- Bagaimana cara mengatakannya: {delivery_mode}",
+            f"- Dasar jawaban: {evidence_mode}",
+        ]
+        if emotion_guidance:
+            guidance_line = emotion_guidance.split("\n")[-1].strip()
+            if guidance_line:
+                lines.append(f"- Panduan emosi tambahan: {guidance_line}")
+        if avoid_rules:
+            lines.append("- Apa yang harus dihindari:")
+            lines.extend(f"  - {rule}" for rule in avoid_rules)
+        return "\n".join(lines)
 
     # ─── Main Chat ────────────────────────────────────────────────────────
 
