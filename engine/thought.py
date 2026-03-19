@@ -49,9 +49,9 @@ STEP3_MEMORY_TEMPLATE = (
     + "ATURAN:\n"
     + "1. NEED_SEARCH: yes hanya jika jenis user meminta/merujuk informasi berjenis data, fakta, solusi teknis, penjelasan lebih lanjut, penanganan, kesehatan, rekomendasi, tata cara, tutorial.\n"
     + "2. Jika NEED_SEARCH: no → SEARCH_QUERY = '-'.\n"
-    + "3. RECALL_TOPIC hanya jika user menyebut masa lalu atau merujuk ingatan secara langsung(kamu ingat gak kita pernah ke bali?, kamu tau gak kesukaan aku?).\n"
+    + "3. RECALL_TOPIC jika memori masa lalu akan membuat jawaban lebih relevan: referensi masa lalu, preferensi user, janji, hobi, hubungan, atau topik lanjutan dari percakapan sebelumnya.\n"
     + "4. RECALL_TOPIC ada jika USE_MEMORY: yes\n"
-    + "5. USE_MEMORY: yes hanya jika RECALL_TOPIC ada.\n"
+    + "5. USE_MEMORY: yes jika ada RECALL_TOPIC atau detail masa lalu penting untuk jawaban personal.\n"
     + "6. REASONING: kalimat singkat yang memutuskan NEED_SEARCH, SEARCH_QUERY, RECALL_TOPIC, USE_MEMORY.\n\n"
     + "CONTOH Output:\n"
     + "REASONING: Butuh data terbaru dari luar. maka perlu NEED_SEARCH dan isi SEARCH_QUERY, tidak perlu RECALL_TOPIC dan USE_MEMORY.\n"
@@ -107,9 +107,9 @@ COMBINED_STATIC_TEMPLATE = (
     + "ATURAN:\n"
     + "1. NEED_SEARCH: yes hanya jika jenis user meminta/merujuk informasi berjenis data, fakta, solusi teknis, penjelasan lebih lanjut, penanganan, kesehatan, rekomendasi, tata cara, tutorial.\n"
     + "2. Jika NEED_SEARCH: no → SEARCH_QUERY = '-'.\n"
-    + "3. RECALL_TOPIC hanya jika user menyebut masa lalu atau merujuk ingatan secara langsung(kamu ingat gak kita pernah ke bali?, kamu tau gak kesukaan aku?).\n"
+    + "3. RECALL_TOPIC jika memori masa lalu akan membuat jawaban lebih relevan: referensi masa lalu, preferensi user, janji, hobi, hubungan, atau topik lanjutan dari percakapan sebelumnya.\n"
     + "4. RECALL_TOPIC ada jika USE_MEMORY: yes\n"
-    + "5. USE_MEMORY: yes hanya jika RECALL_TOPIC ada.\n"
+    + "5. USE_MEMORY: yes jika ada RECALL_TOPIC atau detail masa lalu penting untuk jawaban personal.\n"
     + "6. REASONING: kalimat singkat yang memutuskan NEED_SEARCH, SEARCH_QUERY, RECALL_TOPIC, USE_MEMORY.\n"
     + "CONTOH Output:\n"
     + "REASONING: Butuh data terbaru dari luar. maka perlu NEED_SEARCH dan isi SEARCH_QUERY, tidak perlu RECALL_TOPIC dan USE_MEMORY.\n"
@@ -302,19 +302,22 @@ def _infer_user_emotion(user_input: str, s1: dict, s4: dict, default: str) -> st
 
 
 def _should_force_memory_recall(user_input: str, topic: str, use_memory: bool, recall_topic: str, memory_context: str) -> bool:
-    """Cegah recall paksa di semua turn agar tidak mengulang topik terus-menerus."""
+    """Aktifkan recall saat memori jelas relevan, tanpa menarik semua episodic ke prompt."""
     if recall_topic:
         return True
-    if not use_memory:
-        return False
     if not memory_context or memory_context.strip() in ("", "(kosong)"):
         return False
 
     text = (user_input or "").strip().lower()
+    topic = (topic or "").strip().lower()
     looks_like_question = "?" in text or text.startswith(("apa", "siapa", "kapan", "gimana", "bagaimana", "kenapa"))
+    personal_context = bool(re.search(r"\b(aku|ku|kita|kamu|sayang|hubungan|hob(i|iku)|kesukaan|favorit|janji|pernah)\b", text))
+    continuation = bool(re.search(r"\b(lanjutin|lanjut|tadi|kemarin|dulu|barusan|yang tadi|itu tadi)\b", text + " " + topic))
     if _MEMORY_INTENT_RE.search(text):
         return True
-    return looks_like_question and any(k in text for k in ("ingat", "tadi", "kemarin", "dulu"))
+    if use_memory and (personal_context or continuation):
+        return True
+    return looks_like_question and (personal_context or continuation)
 
 
 def _fallback_step4_note(user_input: str, s1: dict, s3: dict, user_emotion: str) -> str:

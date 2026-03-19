@@ -130,6 +130,23 @@ class ChatManager:
             max_chars=self.budget.memory_budget * 3,
         )
 
+    def _enrich_memory_context(self, memory_ctx: str, thought: dict, user_input: str) -> str:
+        if self.hybrid_memory is None:
+            return memory_ctx
+        recall_topic = (thought.get("recall_topic") or thought.get("topic") or user_input[:60]).strip()
+        if not recall_topic or recall_topic.lower() in ("kosong", "-"):
+            return memory_ctx
+        if not bool(thought.get("use_memory") or thought.get("recall_topic")):
+            return memory_ctx
+        recall_block = self.hybrid_memory.build_recall_context(
+            topic=recall_topic,
+            current_query=user_input,
+            max_chars=max(220, self.budget.memory_budget),
+        )
+        if recall_block and recall_block not in memory_ctx:
+            return ((memory_ctx + "\n\n" + recall_block).strip() if memory_ctx else recall_block)
+        return memory_ctx
+
     def _clean_conversation(self) -> list:
         return [
             {"role": m["role"], "content": m["content"]}
@@ -221,30 +238,7 @@ class ChatManager:
         emotion_guidance = self.emotion_manager.build_prompt_context()
 
         # [6] Supplemental recall
-        recall_topic = thought.get("recall_topic", "")
-        should_recall = bool(thought.get("use_memory") or recall_topic)
-        if should_recall and self.hybrid_memory:
-            target_topic = (recall_topic or thought.get("topic") or user_input[:60]).strip()
-            if target_topic and target_topic.lower() not in ("kosong", "-"):
-                supplemental = self.hybrid_memory.episodic.search_by_facts(target_topic, top_k=1)
-                if supplemental:
-                    s    = supplemental[0]
-                    conv = s.get("conversation", [])
-                    kws  = [w for w in target_topic.lower().split() if len(w) > 2]
-                    lines = []
-                    for i, msg in enumerate(conv):
-                        if msg.get("role") == "user":
-                            content = msg.get("content", "")
-                            if any(kw in content.lower() for kw in kws):
-                                lines.append(f"Aditiya: {content[:100]}")
-                                if i + 1 < len(conv) and conv[i+1].get("role") == "assistant":
-                                    lines.append(f"Asta: {conv[i+1]['content'][:100]}")
-                                if len(lines) >= 4:
-                                    break
-                    if lines:
-                        recall_block = f"[Ingatan: '{target_topic}']\n" + "\n".join(lines)
-                        if recall_block not in memory_ctx:
-                            memory_ctx = (f"{memory_ctx}\n\n{recall_block}".strip() if memory_ctx else recall_block)
+        memory_ctx = self._enrich_memory_context(memory_ctx, thought, user_input)
 
         # [7] Web Search
         web_result = ""
@@ -255,9 +249,11 @@ class ChatManager:
             web_result = search_and_summarize(
                 thought["search_query"], max_results=2, timeout=5)
             if web_result:
-                if self.hybrid_memory and hasattr(self.hybrid_memory, "semantic"):
-                    self.hybrid_memory.semantic.add_fact(
-                        f"web_{thought['search_query'][:30]}", web_result[:200])
+                if self.hybrid_memory and getattr(self.hybrid_memory, "semantic", None):
+                    self.hybrid_memory.semantic.remember_web_result(
+                        thought["search_query"],
+                        web_result,
+                    )
             else:
                 web_result = "[INFO] Web search gagal."
 

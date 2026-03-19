@@ -282,6 +282,11 @@ async def websocket_chat(websocket: WebSocket):
                         and thought.get("search_query")):
                     web_result = search_and_summarize(
                         thought["search_query"], max_results=2, timeout=5)
+                    if web_result and cm.hybrid_memory and getattr(cm.hybrid_memory, "semantic", None):
+                        cm.hybrid_memory.semantic.remember_web_result(
+                            thought["search_query"],
+                            web_result,
+                        )
                     if not web_result:
                         web_result = "[INFO] Web search gagal."
 
