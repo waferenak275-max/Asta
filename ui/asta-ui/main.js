@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { fork } from 'child_process';
 import fs from 'fs';
+import kill from 'tree-kill';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
@@ -53,7 +54,6 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
   }
@@ -63,7 +63,6 @@ function createWindow() {
   });
 }
 
-// IPC listener untuk perubahan tema dari UI
 ipcMain.on('theme-changed', (event, mode) => {
   updateTitleBar(mode === 'dark');
 });
@@ -81,14 +80,15 @@ function startBackend() {
   const runCmd = `"${venvPath}" && uvicorn api:app --host 0.0.0.0 --port 8000`;
   backendProcess = spawn('cmd.exe', ['/c', runCmd], {
     cwd: ROOT_DIR,
-    shell: true,
-    detached: false // Memastikan dia terikat ke parent
+    shell: true
   });
 }
 
 function killProcesses() {
-    if (backendProcess) {
-        spawn("taskkill", ["/pid", backendProcess.pid, "/f", "/t"]);
+    if (backendProcess && backendProcess.pid) {
+        console.log("Killing Backend Tree:", backendProcess.pid);
+        kill(backendProcess.pid, 'SIGKILL');
+        backendProcess = null;
     }
     if (terminalServer) {
         terminalServer.kill();
