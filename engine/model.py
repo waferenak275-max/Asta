@@ -23,9 +23,9 @@ BASE_MODEL_PATH = "./model"
 
 MODELS = {
     "1": {
-        "name": "Qwen2.5 3B",
-        "model_path": os.path.join(BASE_MODEL_PATH, "Qwen2.5-3B", "Qwen2.5-3B.gguf"),
-        "tokenizer_path": os.path.join(BASE_MODEL_PATH, "Qwen2.5-3B", "tokenizer"),
+        "name": "Qwen3-4B-2507",
+        "model_path": os.path.join(BASE_MODEL_PATH, "Qwen3-4B-2507", "Qwen3-4B-2507.gguf"),
+        "tokenizer_path": os.path.join(BASE_MODEL_PATH, "Qwen3-4B-2507", "tokenizer"),
     },
     "2": {
         "name": "Sailor2 8B",
@@ -64,7 +64,7 @@ def _load_llama(model_path, tokenizer_path, n_ctx, n_batch,
             use_mmap=True,
             use_mlock=True,
             n_ctx=n_ctx,
-            verbose=False,
+            verbose=True,
             lora_path=lora_path,
             lora_scale=lora_scale,
             lora_n_gpu_layers=0,

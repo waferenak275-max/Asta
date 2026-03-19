@@ -11,11 +11,12 @@ DEFAULT_CONFIG = {
     "memory_mode": "hybrid",
     "web_search_enabled": True,
     "n_batch": 1024,
-    "tavily_api_key": "",
+    "tavily_api_key": "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",
     "serper_api_key": "",
     "internal_thought_enabled": True,
+    "combined_thought_enabled": True,
     "use_dynamic_prompt": True,
-    "thought_n_ctx": 1024,
+    "thought_n_ctx": 3072,
     "token_budget": {
         "total_ctx": 8192,
         "response_reserved": 512,
@@ -81,6 +82,10 @@ def setup_wizard(cfg: dict) -> dict:
 
     it = input("Aktifkan internal thought? (y/n, default = y): ").strip().lower()
     cfg["internal_thought_enabled"] = it != "n"
+    
+    if cfg["internal_thought_enabled"]:
+        ct = input("Gunakan combined thought (1-step)? (y/n, default = y): ").strip().lower()
+        cfg["combined_thought_enabled"] = ct != "n"
 
     if cfg["internal_thought_enabled"] and cfg["model_choice"] == "2":
         print("\n[Info] Thought model akan menggunakan Sailor2 3B secara terpisah.")

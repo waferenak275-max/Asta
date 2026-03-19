@@ -294,6 +294,7 @@ async def websocket_chat(websocket: WebSocket):
                     web_result=web_result,
                     emotion_guidance=emotion_guidance,
                     thought_note=thought.get("note", ""),
+                    thought=thought,
                 )
 
                 cm.conversation_history.append({"role": "user", "content": user_input})

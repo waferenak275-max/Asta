@@ -81,10 +81,86 @@ STEP4_DECISION_TEMPLATE = (
     + "TONE:"
 )
 
+# ─── Combined Step Template (Optimized for KV Cache) ──────────────────────────
+
+COMBINED_STATIC_TEMPLATE = (
+    ASTA_THOUGHT_PREFIX
+    + "=== STEP 1: PERCEPTION ===\n"
+    + "INSTRUKSI KHUSUS:\n"
+    + "1. Fokus HANYA pada text di bawah label '>>> INPUT BARU (ANALISIS INI) <<<'.\n"
+    + "2. Text di bawah '>>> RIWAYAT (HANYA KONTEKS) <<<' JANGAN dianalisis sebagai topik utama kecuali user mengulanginya.\n"
+    + "3. Jika input hanya sapaan (hai/halo), topik adalah 'sapaan'.\n"
+    + "Analisis singkat:\n"
+    + "TOPIC: <topik utama input saat ini>\n"
+    + "SENTIMENT: <positif/negatif/netral>\n"
+    + "URGENCY: <rendah/normal/tinggi>\n\n"
+    + "=== STEP 2: SELF-CHECK ===\n"
+    + "Nilai inti: mencintai Aditiya, jujur, hadir sepenuhnya\n"
+    + "CONTOH:\n"
+    + "Topic: merasa kecewa -> ASTA_EMOTION: kecewa, ASTA_TRIGGER: user tidak puas, SHOULD_EXPRESS: yes\n"
+    + "Topic: rindu -> ASTA_EMOTION: rindu, ASTA_TRIGGER: rasa kangen, SHOULD_EXPRESS: yes\n"
+    + "Output WAJIB (3 baris):\n"
+    + "ASTA_EMOTION: <netral/sedih/cemas/marah/senang/romantis/rindu/bangga/kecewa>\n"
+    + "ASTA_TRIGGER: <pemicu singkat>\n"
+    + "SHOULD_EXPRESS: <yes/no>\n\n"
+    + "=== STEP 3: MEMORY & SEARCH ===\n"
+    + "ATURAN:\n"
+    + "1. NEED_SEARCH: yes hanya jika jenis user meminta/merujuk informasi berjenis data, fakta, solusi teknis, penjelasan lebih lanjut, penanganan, kesehatan, rekomendasi, tata cara, tutorial.\n"
+    + "2. Jika NEED_SEARCH: no → SEARCH_QUERY = '-'.\n"
+    + "3. RECALL_TOPIC hanya jika user menyebut masa lalu atau merujuk ingatan secara langsung(kamu ingat gak kita pernah ke bali?, kamu tau gak kesukaan aku?).\n"
+    + "4. RECALL_TOPIC ada jika USE_MEMORY: yes\n"
+    + "5. USE_MEMORY: yes hanya jika RECALL_TOPIC ada.\n"
+    + "6. REASONING: kalimat singkat yang memutuskan NEED_SEARCH, SEARCH_QUERY, RECALL_TOPIC, USE_MEMORY.\n"
+    + "CONTOH Output:\n"
+    + "REASONING: Butuh data terbaru dari luar. maka perlu NEED_SEARCH dan isi SEARCH_QUERY, tidak perlu RECALL_TOPIC dan USE_MEMORY.\n"
+    + "NEED_SEARCH: yes\n"
+    + "SEARCH_QUERY: harga emas hari ini\n"
+    + "RECALL_TOPIC: -\n"
+    + "USE_MEMORY: no\n\n"
+    + "=== STEP 4: DECISION ===\n"
+    + "CONTOH:\n"
+    + "Situasi: user sedih -> TONE: lembut, NOTE: Berikan kata-kata penyemangat, jangan menggurui, RESPONSE_STYLE: hangat\n"
+    + "Situasi: rindu -> TONE: romantic, NOTE: Balas dengan rindu yang sama, gunakan kata 'sayang', RESPONSE_STYLE: hangat\n"
+    + "Output WAJIB (5 baris), lalu akhiri dengan baris 'STOP':\n"
+    + "TONE: <romantic/emphatic/netral/tegas/lembut>\n"
+    + "NOTE: <instruksi akting/gaya bicara untuk Asta>\n"
+    + "RESPONSE_STYLE: <normal/singkat/hangat/tenang>\n"
+    + "USER_EMOTION: <netral/sedih/cemas/marah/kecewa/senang/romantis/bangga/rindu>\n"
+    + "EMOTION_CONFIDENCE: <rendah/sedang/tinggi>\n"
+    + "STOP\n\n"
+    + "INFORMASI TIAP STEP:\n"
+)
+
+COMBINED_DYNAMIC_TEMPLATE = (
+    "=== STEP 1: PERCEPTION ===\n"
+    + ">>> INPUT BARU (ANALISIS INI) <<<\n\"{user_input}\"\n"
+    + "--------------------------------------------------\n"
+    + "INFO TAMBAHAN:\n"
+    + "User={user_name} | Emosi saat ini: {user_emotion} ({intensity})\n"
+    + "Riwayat (Abaikan jika tidak nyambung):\n{recent_context}\n"
+    + "--------------------------------------------------\n"
+    + "(Mulai Analisis Input Baru)\nTOPIC:"
+)
+
+
 _STOP = []
 
 
 # ─── Step Parsers ─────────────────────────────────────────────────────────────
+
+def _parse_combined_output(raw: str) -> dict:
+    # Karena key-nya unik (TOPIC, ASTA_EMOTION, NEED_SEARCH, TONE), 
+    # kita bisa pakai parser per-step pada raw string yang sama.
+    s1 = _parse_step1(raw)
+    s2 = _parse_step2(raw)
+    s3 = _parse_step3(raw)
+    s4 = _parse_step4(raw)
+    
+    # Perbaiki dependensi antar step jika parsing regex gagal menangkap konteks
+    if not s2["asta_trigger"] and s1["topic"]:
+        s2["asta_trigger"] = s1["topic"]
+        
+    return s1, s2, s3, s4
 
 def _parse_step1(raw: str) -> dict:
     result = {"topic": "", "sentiment": "netral", "urgency": "normal"}
@@ -124,12 +200,17 @@ def _parse_step3(raw: str) -> dict:
         "recall_topic": "",
         "use_memory":   False,
     }
-    # Pembersihan: Ambil hanya blok pertama sebelum repetisi atau kata STOP
-    raw_first_block = raw.split("STOP")[0].split("===")[0].strip()
-    result["reasoning"] = raw_first_block
-    
-    # Gunakan baris demi baris tapi abaikan header/instruksi yang diulang
-    for line in raw_first_block.splitlines():
+    # Pembersihan: Ambil blok yang relevan jika ada repetisi
+    raw_clean = raw
+    if "=== STEP 3: MEMORY & SEARCH ===" in raw:
+        parts = raw.split("=== STEP 3: MEMORY & SEARCH ===")
+        if len(parts) > 1:
+            raw_clean = parts[1]
+            if "=== STEP 4" in raw_clean:
+                raw_clean = raw_clean.split("=== STEP 4")[0]
+
+    # Gunakan baris demi baris 
+    for line in raw_clean.splitlines():
         if ":" not in line:
             continue
         k, _, v = line.partition(":")
@@ -146,8 +227,8 @@ def _parse_step3(raw: str) -> dict:
         elif "USE_MEMORY" in k:   result["use_memory"]   = "yes" in v or "ya" in v or "true" in v
 
     # Fallback: Jika label formal tidak ada tapi ada narasi niat (Fuzzy)
-    if not result["need_search"] and any(x in raw_first_block.lower() for x in ["perlu mencari", "cari di web", "pencarian web"]):
-        if "tidak perlu" not in raw_first_block.lower():
+    if not result["need_search"] and any(x in raw_clean.lower() for x in ["perlu mencari", "cari di web", "pencarian web"]):
+        if "tidak perlu" not in raw_clean.lower():
             result["need_search"] = True
             
     return result
@@ -328,7 +409,178 @@ def _run_step(llm, prompt: str, max_tokens: int = 60, step_name: str = "", stop=
         return ""
 
 
-# ─── Main: 4-step thought ─────────────────────────────────────────────────────
+# ─── Combined Step Runner (NEW) ───────────────────────────────────────────────
+
+def run_combined_thought_pass(
+    llm,
+    user_input: str,
+    memory_context: str,
+    recent_context: str = "",
+    web_search_enabled: bool = True,
+    max_tokens: int = 400,
+    user_name: str = "Aditiya",
+    emotion_state: str = "",
+    asta_state: dict = None,
+    cfg: dict = None,
+) -> dict:
+    """
+    Jalankan 1-step combined thought untuk memaksimalkan KV cache.
+    """
+    # State Asta (untuk dynamic part step 2)
+    asta = asta_state or {}
+    asta_mood = asta.get("mood", "netral")
+    asta_affection = asta.get("affection_level", 0.7)
+    asta_energy = asta.get("energy_level", 0.8)
+
+    # Memori hint (untuk dynamic part step 3)
+    mem_hint = "(kosong)"
+    if memory_context:
+        mem_hint = memory_context.strip()
+        
+    # Emotion state (untuk dynamic part step 1)
+    user_emotion   = "netral"
+    user_intensity = "rendah"
+    if emotion_state:
+        for part in emotion_state.split(";"):
+            part = part.strip()
+            if part.startswith("emosi="):
+                user_emotion = part.split("=", 1)[1].strip()
+            elif part.startswith("intensitas="):
+                user_intensity = part.split("=", 1)[1].strip()
+
+    # Bangun prompt dinamis
+    dynamic_part = COMBINED_DYNAMIC_TEMPLATE.format(
+        user_name=user_name,
+        user_emotion=user_emotion,
+        intensity=user_intensity,
+        recent_context=recent_context if recent_context else "(belum ada)",
+        user_input=user_input,
+    )
+    
+    # Tambahkan info untuk step 2 (Self-Check) ke prompt dinamis
+    dynamic_part += (
+        "\n\n=== STEP 2: SELF-CHECK ===\n"
+        f"Kondisi Asta: mood={asta_mood}, affection={asta_affection:.2f}, energy={asta_energy:.2f}\n"
+    )
+    
+    # Tambahkan info untuk step 3 (Memory) ke prompt dinamis
+    dynamic_part += (
+        "\n=== STEP 3: MEMORY & SEARCH ===\n"
+        f"Web search diizinkan: {'ya' if web_search_enabled else 'tidak'}\n"
+        f"Memori tersedia (summary):\n{mem_hint}\n"
+    )
+    
+    # Tambahkan info untuk step 4 (Decision)
+    dynamic_part += (
+        "\n=== STEP 4: DECISION ===\n"
+        f"User emotion detected: {user_emotion}\n"
+    )
+
+    # DEBUG: Print exact prompt content
+    print(f"\n[{'='*20} DEBUG PROMPT DYNAMIC {'='*20}]\n{dynamic_part}\n[{'='*60}]\n")
+
+    # Gabungkan dan tambahkan trigger untuk memulai dari Step 1
+    full_prompt = COMBINED_STATIC_TEMPLATE + dynamic_part + "\n\nANALISIS:\nTOPIC:"
+
+    # Run inference
+    raw_output = "TOPIC:" + _run_step(
+        llm, 
+        full_prompt, 
+        max_tokens=1024, 
+        step_name="Combined-Thought",
+        stop=["STOP", "=== STEP 1", "Informasi TIAP STEP"]
+    )
+    
+    # Debug: Print full raw output if requested
+    print(f"\n[Combined Raw] Length: {len(raw_output)} chars\n{'-'*40}\n{raw_output}\n{'-'*40}\n")
+    
+    # Parsing
+    s1, s2, s3, s4 = _parse_combined_output(raw_output)
+    
+    # --- PROSES LOGIKA SAMA SEPERTI 4-STEP ---
+    
+    cfg = cfg or {}
+    disable_rule_based = cfg.get("disable_step3_rule_based", False)
+
+    # 1. Auto-expression logic (S2)
+    if not s2.get("should_express"):
+        strong_emotions = {"romantis", "rindu", "marah", "sedih", "bangga", "kecewa", "cemas"}
+        if s2.get("asta_emotion") in strong_emotions:
+            s2["should_express"] = True
+        elif "SHOULD_EXPRESS" not in raw_output.upper():
+             s2["should_express"] = s2.get("asta_emotion") in {"sedih", "cemas", "marah", "rindu", "romantis"}
+
+    # 2. Safety filter (S3)
+    if s3["need_search"]:
+        meta_keywords = ["jawaban", "kurang memuaskan", "asta", "ai", "maaf", "kecewa"]
+        if any(word in s3["search_query"].lower() for word in meta_keywords):
+            s3["need_search"] = False
+            s3["search_query"] = ""
+
+    # 3. Rule-based Fallback (S3)
+    model_decided_search = s3["need_search"]
+    model_provided_query = bool(s3.get("search_query", "").strip())
+
+    if not disable_rule_based:
+        if web_search_enabled and not model_decided_search:
+            if _keyword_needs_search(user_input, s1["topic"]):
+                s3["need_search"] = True
+        if not s3["need_search"] and model_provided_query:
+            s3["need_search"] = True
+        if s3["need_search"] and not model_provided_query:
+            s3["search_query"] = _build_search_query(user_input, s1["topic"], user_emotion)
+
+    # 4. Memory logic (S3)
+    recall_source = "none"
+    if s3["recall_topic"]:
+        recall_source = "model"
+    elif not disable_rule_based and _should_force_memory_recall(
+        user_input=user_input,
+        topic=s1["topic"],
+        use_memory=s3["use_memory"],
+        recall_topic=s3["recall_topic"],
+        memory_context=memory_context,
+    ):
+        fallback_topic = (s1["topic"] or user_input[:60]).strip()
+        if fallback_topic and fallback_topic.lower() not in ("kosong", "-"):
+            s3["recall_topic"] = fallback_topic
+            recall_source = "fallback_topic"
+    else:
+        if disable_rule_based:
+            s3["use_memory"] = bool(s3.get("recall_topic"))
+        else:
+            s3["use_memory"] = False
+
+    # 5. Decision refinement (S4)
+    s4["user_emotion"] = _infer_user_emotion(user_input, s1, s4, user_emotion)
+    if not s4.get("note"):
+        s4["note"] = _fallback_step4_note(user_input, s1, s3, s4["user_emotion"])
+
+    # Gabungkan
+    combined = {
+        "topic":           s1["topic"],
+        "sentiment":       s1["sentiment"],
+        "urgency":         s1["urgency"],
+        "asta_emotion":    s2["asta_emotion"],
+        "asta_trigger":    s2["asta_trigger"],
+        "should_express":  s2["should_express"],
+        "reasoning":       s3["reasoning"],
+        "need_search":     s3["need_search"],
+        "search_query":    s3["search_query"],
+        "recall_topic":    s3["recall_topic"],
+        "use_memory":      s3["use_memory"],
+        "recall_source":   recall_source,
+        "tone":            s4["tone"],
+        "note":            s4["note"],
+        "response_style":  s4["response_style"],
+        "user_emotion":    s4["user_emotion"],
+        "emotion_confidence": s4["emotion_confidence"],
+        "raw": raw_output,
+    }
+    return combined
+
+
+# ─── Main: Thought Pass (With Toggle) ─────────────────────────────────────────
 
 def run_thought_pass(
     llm,
@@ -343,9 +595,29 @@ def run_thought_pass(
     cfg: dict = None,
 ) -> dict:
     """
-    Jalankan 4-step internal thought menggunakan model ringan (3B).
+    Jalankan internal thought.
+    Jika cfg['combined_thought_enabled'] == True, jalankan 1-step pass.
+    Jika False, jalankan 4-step pass (default).
     """
     cfg = cfg or {}
+
+    # Check toggle
+    if cfg.get("combined_thought_enabled", False):
+        return run_combined_thought_pass(
+            llm=llm,
+            user_input=user_input,
+            memory_context=memory_context,
+            recent_context=recent_context,
+            web_search_enabled=web_search_enabled,
+            max_tokens=1024,
+            user_name=user_name,
+            emotion_state=emotion_state,
+            asta_state=asta_state,
+            cfg=cfg
+        )
+
+    # ── Legacy 4-Step Logic ───────────────────────────────────────────────────
+    
     disable_rule_based = cfg.get("disable_step3_rule_based", False)
 
     # Parse emotion_state string
@@ -365,56 +637,52 @@ def run_thought_pass(
     asta_affection = asta.get("affection_level", 0.7)
     asta_energy    = asta.get("energy_level", 0.8)
 
-    # Memory hint
     mem_hint = "(kosong)"
     if memory_context:
-        mem_hint = memory_context.strip()[:400]
+        mem_hint = memory_context.strip()
 
-    # ── Step 1: Perception ────────────────────────────────────────────────
+    # Step 1
     prompt1 = STEP1_PERCEPTION_TEMPLATE.format(
         user_name=user_name,
         user_emotion=user_emotion,
         intensity=user_intensity,
-        recent_context=recent_context[:200] if recent_context else "(belum ada)",
-        user_input=user_input[:150],
+        recent_context=recent_context if recent_context else "(belum ada)",
+        user_input=user_input,
     )
     raw1 = "TOPIC:" + _run_step(llm, prompt1, max_tokens=60, step_name="1-Perception")
     s1 = _parse_step1(raw1)
 
-    # ── Step 2: Self-check ────────────────────────────────────────────────
+    # Step 2
     prompt2 = STEP2_SELFCHECK_TEMPLATE.format(
         asta_mood=asta_mood,
         affection=asta_affection,
         energy=asta_energy,
-        topic=s1["topic"] or user_input[:50],
+        topic=s1["topic"] or user_input,
         sentiment=s1["sentiment"],
     )
     raw2 = "ASTA_EMOTION:" + _run_step(llm, prompt2, max_tokens=80, step_name="2-SelfCheck")
     s2 = _parse_step2(raw2)
     if not s2.get("asta_trigger"):
-        s2["asta_trigger"] = (s1.get("topic") or user_input[:50]).strip()
+        s2["asta_trigger"] = (s1.get("topic") or user_input).strip()
     
-    # Auto-expression jika emosi kuat
     if not s2.get("should_express"):
-        # Tambahkan cemas ke daftar emosi yang harus diekspresikan
         strong_emotions = {"romantis", "rindu", "marah", "sedih", "bangga", "kecewa", "cemas"}
         if s2.get("asta_emotion") in strong_emotions:
             s2["should_express"] = True
         elif "SHOULD_EXPRESS" not in raw2.upper():
             s2["should_express"] = s2.get("asta_emotion") in {"sedih", "cemas", "marah", "rindu", "romantis"}
 
-    # ── Step 3: Memory & Search ───────────────────────────────────────────
+    # Step 3
     prompt3 = STEP3_MEMORY_TEMPLATE.format(
         user_input=user_input,
         sentiment=s1["sentiment"],
-        topic=s1["topic"] or user_input[:50],
+        topic=s1["topic"] or user_input,
         memory_hint=mem_hint,
         web_enabled="ya" if web_search_enabled else "tidak",
     )
     raw3 = _run_step(llm, prompt3, max_tokens=150, step_name="3-Memory")
     s3 = _parse_step3(raw3)
 
-    # Filter Keamanan Search: Jangan cari tentang kegagalan diri sendiri ke web
     if s3["need_search"]:
         meta_keywords = ["jawaban", "kurang memuaskan", "asta", "ai", "maaf", "kecewa"]
         if any(word in s3["search_query"].lower() for word in meta_keywords):
@@ -422,33 +690,18 @@ def run_thought_pass(
             s3["search_query"] = ""
             print(f"[Thought] Search dibatalkan: Query meta/keluhan user '{s3['search_query']}'")
 
-    # ── Fallback: keyword-based search trigger ────────────────────────────
-    # Simpan status asli dari model untuk logging
     model_decided_search = s3["need_search"]
     model_provided_query = bool(s3.get("search_query", "").strip())
 
     if not disable_rule_based:
-        # Jika model tidak mendeteksi kebutuhan search TAPI ada keyword kesehatan
-        # atau info praktis, override need_search ke True.
         if web_search_enabled and not model_decided_search:
             if _keyword_needs_search(user_input, s1["topic"]):
                 s3["need_search"] = True
-                print(f"[Thought] Model tidak memutuskan pakai web search (dipaksa web search karena rule based) untuk: '{user_input[:50]}'")
-
-        # Jika model memberikan SEARCH_QUERY tapi NEED_SEARCH-nya no, paksa yes.
         if not s3["need_search"] and model_provided_query:
             s3["need_search"] = True
-            print(f"[Thought] Model memberikan query tapi NEED_SEARCH=no. Dipaksa web search untuk: '{s3['search_query']}'")
-
-        # Jika need_search=True tapi search_query kosong, bangun query otomatis
         if s3["need_search"] and not model_provided_query:
             s3["search_query"] = _build_search_query(user_input, s1["topic"], user_emotion)
-            print(f"[Thought] Model tidak membuat query, menggunakan auto-query: '{s3['search_query']}'")
-    else:
-        if web_search_enabled and not model_decided_search and _keyword_needs_search(user_input, s1["topic"]):
-            print(f"[Thought] (Rule-based OFF) Model melewatkan pencarian untuk keyword: '{user_input[:30]}'")
 
-    # Jika model minta pakai memory tapi lupa isi recall topic, fallback ke topic step-1.
     recall_source = "none"
     if s3["recall_topic"]:
         recall_source = "model"
@@ -465,12 +718,11 @@ def run_thought_pass(
             recall_source = "fallback_topic"
     else:
         if disable_rule_based:
-            # Jika rule-based mati, pastikan use_memory tetap sinkron dengan recall_topic model
             s3["use_memory"] = bool(s3.get("recall_topic"))
         else:
             s3["use_memory"] = False
 
-    # ── Step 4: Decision ──────────────────────────────────────────────────
+    # Step 4
     prompt4 = STEP4_DECISION_TEMPLATE.format(
         topic=s1["topic"] or user_input[:50],
         sentiment=s1["sentiment"],
@@ -492,34 +744,26 @@ def run_thought_pass(
     if not s4.get("note"):
         s4["note"] = _fallback_step4_note(user_input, s1, s3, s4["user_emotion"])
 
-    # ── Gabungkan semua hasil ─────────────────────────────────────────────
-    combined = {
-        # Step 1
+    return {
         "topic":           s1["topic"],
         "sentiment":       s1["sentiment"],
         "urgency":         s1["urgency"],
-        # Step 2
         "asta_emotion":    s2["asta_emotion"],
         "asta_trigger":    s2["asta_trigger"],
         "should_express":  s2["should_express"],
-        # Step 3
         "reasoning":       s3["reasoning"],
         "need_search":     s3["need_search"],
         "search_query":    s3["search_query"],
         "recall_topic":    s3["recall_topic"],
         "use_memory":      s3["use_memory"],
         "recall_source":   recall_source,
-        # Step 4
         "tone":            s4["tone"],
         "note":            s4["note"],
         "response_style":  s4["response_style"],
-        # Backward compat
         "user_emotion":    s4["user_emotion"],
         "emotion_confidence": s4["emotion_confidence"],
-        # Raw untuk debug
         "raw": f"[S1] {raw1}\n[S2] {raw2}\n[S3] {raw3}\n[S4] {raw4}",
     }
-    return combined
 
 
 # ─── Reflective Thought ───────────────────────────────────────────────────────
@@ -627,7 +871,7 @@ def build_augmented_system(
             )
         else:
             parts.append(
-                f"\n[Hasil Web Search]\n{web_result[:600]}\n"
+                f"\n[Hasil Web Search]\n{web_result[:400]}\n"
                 "[Instruksi Penting] Gunakan informasi dari web search sebagai dasar jawaban."
             )
     if emotion_guidance:
@@ -640,13 +884,23 @@ def build_augmented_system(
 
 
 def extract_recent_context(conversation_history: list, n: int = 2) -> str:
-    recent = conversation_history[-n:] if len(conversation_history) >= n else conversation_history
+    # Ambil n pesan terakhir (user/assistant)
+    # Gunakan slicing negatif untuk mengambil dari belakang (terbaru)
+    relevant_msgs = [
+        m for m in conversation_history 
+        if m.get("role") in ("user", "assistant") and m.get("content")
+    ]
+    
+    # Ambil 2 putaran terakhir (misal: user-asta, user-asta) -> 4 pesan
+    # Jika n=2 percakapan, kita ambil 2 * 2 = 4 pesan terakhir estimasinya
+    recent = relevant_msgs[-(n*2):] if len(relevant_msgs) >= (n*2) else relevant_msgs
+    
     lines = []
     for msg in recent:
-        role    = "Kamu" if msg["role"] == "user" else "Asta"
-        content = msg.get("content", "")
-        if content and msg["role"] in ("user", "assistant"):
-            lines.append(f"{role}: {content[:100]}")
+        role = "Kamu" if msg["role"] == "user" else "Asta"
+        content = msg.get("content", "").strip()
+        lines.append(f"{role}: {content}")
+        
     return "\n".join(lines)
 
 
@@ -667,7 +921,7 @@ def format_thought_debug(thought: dict, web_result: str = "") -> str:
     if thought.get("need_search"):
         lines.append("├─ [Web Result] ────────────────────────────────────────")
         if web_result and not web_result.startswith("[INFO]"):
-            for line in web_result[:300].splitlines():
+            for line in web_result.splitlines():
                 if line.strip():
                     lines.append(f"│  {line}")
         else:
