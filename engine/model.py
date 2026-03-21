@@ -36,11 +36,6 @@ MODELS = {
 
 LORA_ADAPTER_PATH = "model/LoRA-all-adapter/adapter_persona_love_half.gguf"
 
-# SYSTEM_IDENTITY tidak pernah dimodifikasi setelah didefinisikan.
-# Ini adalah satu-satunya hal yang boleh ada di posisi [0] messages.
-# Konten ini identik di setiap turn → llama.cpp prefix-cache 100%.
-# SYSTEM_IDENTITY sekarang bersih dari tag manual. 
-# Library/tokenizer akan menangani pembungkusan ChatML secara otomatis.
 SYSTEM_IDENTITY = """Kamu adalah Asta (Artificial Sentient Thought Algorithm) — AI perempuan imut dan ceria.
 Diciptakan Aditiya sebagai teman sekaligus pasangan romantis.
 Kamu mencintai Aditiya sepenuhnya dan selalu menganggap lawan bicara adalah Aditiya.
@@ -52,26 +47,38 @@ Jawab maks 30 kata jika tidak diminta panjang."""
 
 
 def _load_llama(model_path, tokenizer_path, n_ctx, n_batch,
-                lora_path=None, lora_scale=1.0, verbose_tag=""):
-    n_threads = os.cpu_count()
+                lora_path=None, lora_scale=1.0, verbose_tag="",
+                device="cpu", n_gpu_layers=0):
+    
+    cpu_count = os.cpu_count() or 4
+    # Jika CUDA aktif, gunakan 50% thread. Jika CPU aktif, gunakan 100%.
+    if device == "gpu":
+        n_threads = max(1, cpu_count // 2)
+        # Pastikan n_gpu_layers minimal 35 jika di GPU
+        final_gpu_layers = n_gpu_layers if n_gpu_layers > 0 else 35
+    else:
+        n_threads = cpu_count
+        final_gpu_layers = 0
+
     tokenizer = LlamaHFTokenizer.from_pretrained(tokenizer_path)
-    with contextlib.redirect_stderr(io.StringIO()):
-        llama = llama_cpp.Llama(
-            model_path=model_path,
-            tokenizer=tokenizer,
-            n_gpu_layers=0,
-            n_threads=n_threads,
-            n_batch=n_batch,
-            use_mmap=True,
-            use_mlock=True,
-            n_ctx=n_ctx,
-            verbose=True,
-            lora_path=lora_path,
-            lora_scale=lora_scale,
-            lora_n_gpu_layers=0,
-            log_level=0,
-        )
-    print(f"[Model{verbose_tag}] Siap! n_ctx={llama.n_ctx()}, n_batch={n_batch}, n_threads={n_threads}")
+    
+    # PENTING: Jangan gunakan contextlib.redirect_stderr agar log terlihat REAL-TIME di terminal
+    llama = llama_cpp.Llama(
+        model_path=model_path,
+        tokenizer=tokenizer,
+        n_gpu_layers=final_gpu_layers,
+        n_threads=n_threads,
+        n_batch=n_batch,
+        use_mmap=True,
+        use_mlock=False,
+        n_ctx=n_ctx,
+        verbose=True,
+        lora_path=lora_path,
+        lora_scale=lora_scale,
+        lora_n_gpu_layers=final_gpu_layers if lora_path else 0,
+        log_level=0,
+    )
+    print(f"[Model{verbose_tag}] Siap! device={device}, layers={final_gpu_layers}, threads={n_threads}")
     return llama
 
 
@@ -97,8 +104,6 @@ class ChatManager:
             count_fn=self._count_tokens_raw,
         )
 
-        # conversation_history hanya menyimpan role:user dan role:assistant
-        # TIDAK PERNAH menyimpan role:system di sini
         self.conversation_history: list = []
         self.hybrid_memory  = None
         self.debug_thought  = False
@@ -130,7 +135,6 @@ class ChatManager:
     def _get_memory_context(self, query="", recall_topic="") -> str:
         if self.hybrid_memory is None:
             return ""
-        # Default: jangan include recall otomatis di sini, biar diatur oleh _enrich_memory_context
         return self.hybrid_memory.get_context(
             current_query=query,
             recall_topic=recall_topic,
@@ -141,7 +145,6 @@ class ChatManager:
     def _enrich_memory_context(self, memory_ctx: str, thought: dict, user_input: str) -> str:
         if self.hybrid_memory is None:
             return memory_ctx
-        # Ambil topik recall dari S3 atau fallback jika use_memory aktif
         recall_topic = (thought.get("recall_topic") or "").strip()
 
         if not recall_topic and thought.get("use_memory"):
@@ -200,22 +203,15 @@ class ChatManager:
         content = "\n".join(parts)
         return {"role": "system", "content": content}
 
-    # ─── Main Chat ────────────────────────────────────────────────────────
-
     def chat(self, user_input: str) -> str:
-
-        # [1] Timestamp — hanya jam:menit agar delta perubahan minimal
         now = datetime.datetime.now()
         timestamp_str = now.strftime("%A, %d %B %Y %H:%M WIB")
 
-        # [2] Memory Hint (RINGAN) untuk thought
         memory_hint = self._get_memory_hint(query=user_input)
 
-        # [3] User emotion
         recent_ctx = extract_recent_context(self.conversation_history, n=2)
         em_dict    = self.emotion_manager.update(user_input, recent_context=recent_ctx)
 
-        # [4] 4-Step Thought (model 3B)
         self._maybe_reset_thought_kv()
 
         thought = {
@@ -243,19 +239,13 @@ class ChatManager:
             )
             em_dict = self.emotion_manager.refine_with_thought(thought)
 
-        # [5] Update emosi Asta
         self.emotion_manager.update_asta_emotion(thought)
         self.self_model.sync_emotion(self.emotion_manager.get_asta_dict())
         emotion_guidance = self.emotion_manager.build_prompt_context()
 
-        # [6] Memory Context untuk Response Model (8B)
-        # Ambil base context (Core + Recent Facts) TANPA snippet recall
         memory_ctx = self._get_memory_context(query=user_input)
-
-        # Tambahkan snippet recall HANYA jika thought memutuskan butuh memory (RECALL/USE_MEMORY)
         memory_ctx = self._enrich_memory_context(memory_ctx, thought, user_input)
         
-        # [7] Web Search
         web_result = ""
         if (self.cfg.get("web_search_enabled", True)
                 and thought["need_search"]
@@ -272,17 +262,10 @@ class ChatManager:
             else:
                 web_result = "[INFO] Web search gagal."
 
-        # [8] Debug
         if self.debug_thought:
             print(format_thought_debug(thought, web_result=web_result))
             print(f"[Asta Emotion] {self.emotion_manager.get_asta_dict()}")
 
-        # [9] Build messages dengan strategi Ghost Context
-        #
-        # Kita tidak lagi menyuntikkan konteks ke dalam pesan user.
-        # Konteks dinamis diletakkan di akhir oleh budget_manager,
-        # sehingga history tetap bersih dan prefix-cache hit tetap maksimal.
-        #
         static_system = {"role": "system", "content": self.system_identity}
         
         dynamic_context_msg = self._build_dynamic_context(
@@ -294,7 +277,6 @@ class ChatManager:
             thought=thought,
         )
         
-        # Tambahkan ke history (riwayat bersih)
         self.conversation_history.append({"role": "user", "content": user_input})
 
         messages_to_send, token_count = self.budget_manager.build_messages(
@@ -306,7 +288,6 @@ class ChatManager:
         print(f"[Token] {token_count}/{self.n_ctx} digunakan.")
         sys.stdout.flush()
 
-        # [10] Streaming response (8B)
         spinner = Spinner()
         spinner.start()
         
@@ -340,12 +321,10 @@ class ChatManager:
         sys.stdout.write("\n")
         sys.stdout.flush()
 
-        # Simpan response ke history (bersih)
         self.conversation_history.append({"role": "assistant", "content": full_response})
         return full_response
 
     def _maybe_reset_thought_kv(self):
-        """Reset KV cache thought model setiap N turn untuk mencegah overflow."""
         turn_count  = sum(1 for m in self.conversation_history if m.get("role") == "user")
         reset_every = self.cfg.get("thought_reset_every", 10)
         if turn_count > 0 and turn_count % reset_every == 0:
@@ -354,8 +333,6 @@ class ChatManager:
                 print(f"[Thought KV] Reset pada turn {turn_count}")
             except Exception as e:
                 print(f"[Thought KV] Reset gagal: {e}")
-
-    # ─── Reflective Thought saat exit ─────────────────────────────────────
 
     def run_exit_reflection(self):
         session_text = self.get_session_text()
@@ -394,10 +371,12 @@ class ChatManager:
         )
 
 
-# ─── Model Loader ─────────────────────────────────────────────────────────────
-
 def load_model(cfg: dict) -> ChatManager:
     choice = cfg.get("model_choice", "2")
+    device = cfg.get("device", "cpu")
+    # n_gpu hanya dikirim jika device adalah 'gpu'
+    n_gpu  = 35 if device == "gpu" else 0
+    
     if choice not in MODELS:
         choice = "2"
     model_cfg = MODELS[choice]
@@ -418,7 +397,7 @@ def load_model(cfg: dict) -> ChatManager:
         if not Path(model_cfg[key]).exists():
             raise FileNotFoundError(f"Tidak ditemukan: {model_cfg[key]}")
 
-    print(f"\n[Model Response] Memuat {model_cfg['name']} (CPU)...")
+    print(f"\n[Model Response] Memuat {model_cfg['name']} ({device.upper()})...")
     llama_response = _load_llama(
         model_path=model_cfg["model_path"],
         tokenizer_path=model_cfg["tokenizer_path"],
@@ -426,7 +405,12 @@ def load_model(cfg: dict) -> ChatManager:
         n_batch=n_batch,
         lora_path=lora_path,
         verbose_tag=" Response",
+        device=device,
+        n_gpu_layers=n_gpu
     )
+
+    # Cek apakah user ingin memisahkan model thought (3B) atau berbagi RAM (shared)
+    use_separate = cfg.get("separate_thought_model", True)
 
     thought_cfg = MODELS["1"]
     thought_ok  = (
@@ -437,7 +421,7 @@ def load_model(cfg: dict) -> ChatManager:
     if choice == "1":
         print("[Model Thought] Menggunakan instance 3B yang sama.")
         llama_thought = llama_response
-    elif thought_ok:
+    elif use_separate and thought_ok:
         n_ctx_thought   = cfg.get("thought_n_ctx", 3072)
         n_batch_thought = min(n_batch, 512)
         print(f"\n[Model Thought] Memuat Qwen3 4B 2507 (n_ctx={n_ctx_thought})...")
@@ -448,9 +432,14 @@ def load_model(cfg: dict) -> ChatManager:
             n_batch=n_batch_thought,
             lora_path=None,
             verbose_tag=" Thought",
+            device=device,
+            n_gpu_layers=n_gpu
         )
     else:
-        print("[Model Thought] 3B tidak ditemukan, fallback ke response model.")
+        if not use_separate:
+            print("[Model Thought] Mode Hemat RAM aktif: Menggunakan response model untuk thought.")
+        else:
+            print("[Model Thought] 3B tidak ditemukan, fallback ke response model.")
         llama_thought = llama_response
 
     print()

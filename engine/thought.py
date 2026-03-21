@@ -491,7 +491,12 @@ def run_combined_thought_pass(
     )
 
     # DEBUG: Print exact prompt content
-    print(f"\n[{'='*20} DEBUG PROMPT DYNAMIC {'='*20}]\n{dynamic_part}\n[{'='*60}]\n")
+    try:
+        print(f"\n[{'='*20} DEBUG PROMPT DYNAMIC {'='*20}]\n{dynamic_part}\n[{'='*60}]\n")
+    except UnicodeEncodeError:
+        print(dynamic_part.encode('ascii', 'ignore').decode('ascii'))
+    import sys
+    sys.stdout.flush()
 
     # Gabungkan dan tambahkan trigger untuk memulai dari Step 1
     full_prompt = COMBINED_STATIC_TEMPLATE + dynamic_part + "\n\nANALISIS:\nTOPIC:"
@@ -506,7 +511,11 @@ def run_combined_thought_pass(
     )
     
     # Debug: Print full raw output if requested
-    print(f"\n[Combined Raw] Length: {len(raw_output)} chars\n{'-'*40}\n{raw_output}\n{'-'*40}\n")
+    try:
+        print(f"\n[Combined Raw] Length: {len(raw_output)} chars\n{'-'*40}\n{raw_output}\n{'-'*40}\n")
+    except UnicodeEncodeError:
+        print(raw_output.encode('ascii', 'ignore').decode('ascii'))
+    sys.stdout.flush()
     
     # Parsing
     s1, s2, s3, s4 = _parse_combined_output(raw_output)

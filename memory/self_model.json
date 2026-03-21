@@ -15,11 +15,11 @@
     "current_emotion": "netral",
     "current_intensity": "rendah",
     "mood": "netral",
-    "mood_score": -0.0392,
-    "affection_level": 0.9468,
-    "energy_level": 0.8788,
-    "trigger": "sapaan",
-    "updated_at": "2026-03-19T21:28:30.614766"
+    "mood_score": 0.0253,
+    "affection_level": 0.9466,
+    "energy_level": 0.823,
+    "trigger": "netral",
+    "updated_at": "2026-03-21T19:48:01.785140"
   },
   "preferences": {
     "suka": [

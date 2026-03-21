@@ -1,6 +1,6 @@
 {
   "model_choice": "2",
-  "device": "cpu",
+  "device": "gpu",
   "use_lora": true,
   "lora_n_gpu_layers": 0,
   "memory_mode": "hybrid",
@@ -8,9 +8,8 @@
   "n_batch": 1024,
   "tavily_api_key": "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",
   "serper_api_key": "",
-  "internal_thought_enabled": true,
+  "internal_thought_enabled": false,
   "combined_thought_enabled": true,
-  "disable_step3_rule_based": true,
   "use_dynamic_prompt": true,
   "thought_n_ctx": 2048,
   "token_budget": {
@@ -19,5 +18,7 @@
     "system_identity": 350,
     "memory_budget": 600
   },
-  "_user_name": "Aditiya"
+  "disable_step3_rule_based": true,
+  "_user_name": "Aditiya",
+  "separate_thought_model": false
 }
