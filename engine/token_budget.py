@@ -1,51 +1,73 @@
 from dataclasses import dataclass
-from typing import List, Dict, Optional
+from typing import Callable, Dict, List, Optional
+
 
 @dataclass
 class TokenBudget:
-    total_ctx: int = 8192
+    total_ctx:        int = 8192
     response_reserved: int = 512
-    system_identity: int = 350
-    memory_budget: int = 600
+    system_identity:  int = 350
+    memory_budget:    int = 600
 
     @property
     def available_total(self) -> int:
         return self.total_ctx - self.response_reserved
 
+
 class TokenBudgetManager:
-    def __init__(self, budget: TokenBudget, count_fn):
+    def __init__(self, budget: TokenBudget, count_fn: Callable[[List[Dict]], int]):
         self.budget   = budget
         self.count_fn = count_fn
 
     def build_messages(
         self,
-        system_identity: Dict,
+        system_identity:      Dict,
         conversation_history: List[Dict],
-        dynamic_context: Optional[Dict] = None,
-        **kwargs
+        dynamic_context:      Optional[Dict] = None,
     ) -> tuple:
+        """
+        Susun messages yang akan dikirim ke model dengan batasan token.
 
-        used_tokens = self.count_fn([system_identity])
-        dynamic_cost = self.count_fn([dynamic_context]) if dynamic_context else 0
-        conv_budget = self.budget.available_total - used_tokens - dynamic_cost
+        Urutan prioritas (dari tertinggi):
+          1. system_identity  — selalu masuk
+          2. dynamic_context  — selalu masuk (berisi memori, emosi, catatan thought)
+          3. conversation_history — dipotong dari yang paling lama jika budget habis
 
+        Returns:
+            (final_messages, total_token_count)
+        """
+        # Hitung slot yang sudah terpakai
+        used = self.count_fn([system_identity])
+        if dynamic_context:
+            used += self.count_fn([dynamic_context])
+
+        conv_budget = self.budget.available_total - used
+
+        # Pilih history dari belakang (terbaru) selama masih muat
         clean_history = [
             m for m in conversation_history
             if m.get("role") in ("user", "assistant") and m.get("content")
         ]
 
-        selected_history = []
+        selected: List[Dict] = []
         for msg in reversed(clean_history):
             cost = self.count_fn([msg])
             if conv_budget - cost >= 0:
-                selected_history.insert(0, msg)
+                selected.insert(0, msg)
                 conv_budget -= cost
             else:
-                break
+                break  # budget habis, hentikan (tidak skip)
 
-        final_messages = [system_identity] + selected_history
+        final = [system_identity] + selected
         if dynamic_context:
-            final_messages.append(dynamic_context)
+            final.append(dynamic_context)
 
-        total_tokens = self.count_fn(final_messages)
-        return final_messages, total_tokens
+        total_tokens = self.count_fn(final)
+        return final, total_tokens
+
+    def estimate_memory_chars(self) -> int:
+        """
+        Estimasi kasar berapa karakter memory yang aman dimasukkan
+        berdasarkan memory_budget token. Asumsi: ~3 karakter per token.
+        """
+        return self.budget.memory_budget * 3

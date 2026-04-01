@@ -1,23 +1,55 @@
 import json
 import re
+import threading
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Optional
 
+# ─── Config Cache ─────────────────────────────────────────────────────────────
 
-# ─── Load Config ──────────────────────────────────────────────────────────────
+_cfg_cache:      dict          = {}
+_cfg_lock:       threading.Lock = threading.Lock()
+_cfg_mtime:      float         = 0.0
+_CONFIG_PATH:    Path          = Path("config.json")
+
 
 def _get_cfg() -> dict:
+    """
+    Baca config.json dengan caching berbasis mtime.
+    Hanya baca ulang dari disk jika file berubah.
+    """
+    global _cfg_cache, _cfg_mtime
     try:
-        return json.loads(Path("config.json").read_text(encoding="utf-8"))
-    except Exception:
+        mtime = _CONFIG_PATH.stat().st_mtime
+    except OSError:
         return {}
+
+    with _cfg_lock:
+        if mtime != _cfg_mtime:
+            try:
+                _cfg_cache = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+                _cfg_mtime = mtime
+            except Exception:
+                pass
+        return dict(_cfg_cache)
+
+
+def invalidate_cfg_cache() -> None:
+    """Paksa refresh cache pada call berikutnya (dipanggil setelah save_config)."""
+    global _cfg_mtime
+    with _cfg_lock:
+        _cfg_mtime = 0.0
 
 
 # ─── Fetcher Dasar ────────────────────────────────────────────────────────────
 
-def _fetch(url: str, headers: dict = None, data: bytes = None, timeout: int = 5) -> Optional[str]:
+def _fetch(
+    url: str,
+    headers: Optional[dict] = None,
+    data: Optional[bytes] = None,
+    timeout: int = 5,
+) -> Optional[str]:
     try:
         h = {"User-Agent": "Mozilla/5.0 (compatible; AstaBot/1.0)"}
         if headers:
@@ -39,21 +71,22 @@ _CURRENCY_PATTERN = re.compile(
 )
 _CURRENCY_MAP = {
     "dolar": "USD", "dollar": "USD", "usd": "USD",
-    "euro": "EUR", "eur": "EUR",
-    "yen": "JPY", "jpy": "JPY",
-    "sgd": "SGD",
-    "pound": "GBP", "gbp": "GBP",
-    "ringgit": "MYR", "myr": "MYR",
+    "euro":  "EUR", "eur":    "EUR",
+    "yen":   "JPY", "jpy":    "JPY",
+    "sgd":   "SGD",
+    "pound": "GBP", "gbp":    "GBP",
+    "ringgit": "MYR", "myr":  "MYR",
 }
+
 
 def _is_currency_query(query: str) -> bool:
     return bool(_CURRENCY_PATTERN.search(query))
 
+
 def _get_exchange_rate(query: str, timeout: int = 5) -> str:
     query_lower = query.lower()
     target = next(
-        (code for kw, code in _CURRENCY_MAP.items() if kw in query_lower),
-        "USD"
+        (code for kw, code in _CURRENCY_MAP.items() if kw in query_lower), "USD"
     )
     raw = _fetch(f"https://open.er-api.com/v6/latest/{target}", timeout=timeout)
     if not raw:
@@ -79,18 +112,16 @@ def _tavily_search(query: str, timeout: int = 7) -> str:
     api_key = _get_cfg().get("tavily_api_key", "")
     if not api_key:
         return ""
-
     payload = json.dumps({
-        "query": query,
-        "search_depth": "basic",
-        "max_results": 3,
+        "query":          query,
+        "search_depth":   "basic",
+        "max_results":    3,
         "include_answer": True,
     }).encode("utf-8")
-
     raw = _fetch(
         "https://api.tavily.com/search",
         headers={
-            "Content-Type": "application/json",
+            "Content-Type":  "application/json",
             "Authorization": f"Bearer {api_key}",
         },
         data=payload,
@@ -99,16 +130,14 @@ def _tavily_search(query: str, timeout: int = 7) -> str:
     if not raw:
         return ""
     try:
-        data = json.loads(raw)
+        data  = json.loads(raw)
         parts = []
         if data.get("answer"):
             parts.append(f"Jawaban: {data['answer']}")
         for r in data.get("results", [])[:2]:
-            title = r.get("title", "")
             content = r.get("content", "")[:300]
-            url = r.get("url", "")
             if content:
-                parts.append(f"[{title}]\n{content}\nSumber: {url}")
+                parts.append(f"[{r.get('title','')}]\n{content}\nSumber: {r.get('url','')}")
         return "\n\n".join(parts) if parts else ""
     except Exception:
         return ""
@@ -120,43 +149,30 @@ def _serper_search(query: str, timeout: int = 5) -> str:
     api_key = _get_cfg().get("serper_api_key", "")
     if not api_key:
         return ""
-
-    payload = json.dumps({
-        "q": query,
-        "num": 3,
-        "hl": "id",
-    }).encode("utf-8")
-
+    payload = json.dumps({"q": query, "num": 3, "hl": "id"}).encode("utf-8")
     raw = _fetch(
         "https://google.serper.dev/search",
-        headers={
-            "Content-Type": "application/json",
-            "X-API-KEY": api_key,
-        },
+        headers={"Content-Type": "application/json", "X-API-KEY": api_key},
         data=payload,
         timeout=timeout,
     )
     if not raw:
         return ""
     try:
-        data = json.loads(raw)
+        data  = json.loads(raw)
         parts = []
-        if data.get("answerBox", {}).get("answer"):
-            parts.append(f"Jawaban: {data['answerBox']['answer']}")
-        elif data.get("answerBox", {}).get("snippet"):
-            parts.append(f"Jawaban: {data['answerBox']['snippet']}")
-        # Knowledge graph
-        if data.get("knowledgeGraph", {}).get("description"):
-            kg = data["knowledgeGraph"]
-            parts.append(
-                f"[{kg.get('title', '')}]\n{kg['description'][:300]}"
-            )
+        ab    = data.get("answerBox", {})
+        if ab.get("answer"):
+            parts.append(f"Jawaban: {ab['answer']}")
+        elif ab.get("snippet"):
+            parts.append(f"Jawaban: {ab['snippet']}")
+        kg = data.get("knowledgeGraph", {})
+        if kg.get("description"):
+            parts.append(f"[{kg.get('title','')}]\n{kg['description'][:300]}")
         for r in data.get("organic", [])[:2]:
-            title = r.get("title", "")
             snippet = r.get("snippet", "")[:250]
-            link = r.get("link", "")
             if snippet:
-                parts.append(f"[{title}]\n{snippet}\nSumber: {link}")
+                parts.append(f"[{r.get('title','')}]\n{snippet}\nSumber: {r.get('link','')}")
         return "\n\n".join(parts) if parts else ""
     except Exception:
         return ""
@@ -166,21 +182,23 @@ def _serper_search(query: str, timeout: int = 5) -> str:
 
 def _ddg_instant(query: str, timeout: int = 5) -> str:
     encoded = urllib.parse.quote_plus(query)
-    url = f"https://api.duckduckgo.com/?q={encoded}&format=json&no_html=1&skip_disambig=1"
+    url     = (
+        f"https://api.duckduckgo.com/?q={encoded}"
+        f"&format=json&no_html=1&skip_disambig=1"
+    )
     raw = _fetch(url, timeout=timeout)
     if not raw:
         return ""
     try:
-        data = json.loads(raw)
+        data  = json.loads(raw)
         parts = []
         if data.get("Answer"):
             parts.append(f"Jawaban: {data['Answer']}")
         if data.get("AbstractText"):
             parts.append(data["AbstractText"][:400])
-        if data.get("Infobox", {}).get("content"):
-            for item in data["Infobox"]["content"][:3]:
-                if item.get("label") and item.get("value"):
-                    parts.append(f"{item['label']}: {item['value']}")
+        for item in data.get("Infobox", {}).get("content", [])[:3]:
+            if item.get("label") and item.get("value"):
+                parts.append(f"{item['label']}: {item['value']}")
         return "\n".join(parts) if parts else ""
     except Exception:
         return ""
@@ -192,8 +210,7 @@ def _wikipedia_search(query: str, timeout: int = 5) -> str:
     import datetime
     if re.search(r"\b(saat ini|sekarang|terkini)\b", query, re.IGNORECASE):
         query = f"{query} {datetime.datetime.now().year}"
-
-    for lang in ["id", "en"]:
+    for lang in ("id", "en"):
         encoded = urllib.parse.quote_plus(query)
         raw = _fetch(
             f"https://{lang}.wikipedia.org/w/api.php"
@@ -203,9 +220,9 @@ def _wikipedia_search(query: str, timeout: int = 5) -> str:
         if not raw:
             continue
         try:
-            title = json.loads(raw)["query"]["search"][0]["title"]
+            title     = json.loads(raw)["query"]["search"][0]["title"]
             title_enc = urllib.parse.quote(title)
-            raw2 = _fetch(
+            raw2      = _fetch(
                 f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{title_enc}",
                 timeout=timeout,
             )
@@ -220,26 +237,26 @@ def _wikipedia_search(query: str, timeout: int = 5) -> str:
 
 # ─── Main Search Function ─────────────────────────────────────────────────────
 
-def search_and_summarize(query: str, max_results: int = 3, timeout: int = 7) -> str:
+def search_and_summarize(
+    query: str,
+    max_results: int = 3,
+    timeout: int = 7,
+) -> str:
+    """
+    Coba sumber satu per satu sampai ada yang berhasil.
+    Urutan: kurs → tavily → serper → ddg → wikipedia.
+    """
     if _is_currency_query(query):
         result = _get_exchange_rate(query, timeout=timeout)
         if result:
             return result
 
-    result = _tavily_search(query, timeout=timeout)
-    if result:
-        return result
-
-    result = _serper_search(query, timeout=timeout)
-    if result:
-        return result
-
-    result = _ddg_instant(query, timeout=timeout)
-    if result:
-        return result
-
-    result = _wikipedia_search(query, timeout=timeout)
-    if result:
-        return result
+    for fn in (_tavily_search, _serper_search, _ddg_instant, _wikipedia_search):
+        try:
+            result = fn(query, timeout=timeout)
+            if result:
+                return result
+        except Exception:
+            continue
 
     return ""

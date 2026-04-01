@@ -1,24 +1,28 @@
 {
   "model_choice": "2",
-  "device": "gpu",
+  "device": "cpu",
   "use_lora": true,
   "lora_n_gpu_layers": 0,
   "memory_mode": "hybrid",
   "web_search_enabled": true,
   "n_batch": 1024,
-  "tavily_api_key": "",
+  "tavily_api_key": "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",
   "serper_api_key": "",
-  "internal_thought_enabled": false,
+  "internal_thought_enabled": true,
   "combined_thought_enabled": true,
+  "long_thinking_enabled": false,
+  "long_thinking_max_tokens": 1536,
   "use_dynamic_prompt": true,
   "thought_n_ctx": 2048,
+  "thought_max_tokens": 1024,
+  "thought_reset_every": 10,
+  "disable_step3_rule_based": true,
+  "separate_thought_model": true,
   "token_budget": {
     "total_ctx": 8192,
     "response_reserved": 512,
     "system_identity": 350,
     "memory_budget": 600
   },
-  "disable_step3_rule_based": true,
-  "_user_name": "Aditiya",
-  "separate_thought_model": false
+  "_user_name": "Aditiya"
 }

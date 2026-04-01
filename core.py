@@ -11,7 +11,6 @@ from engine.memory import (
     add_episodic,
     get_hybrid_memory,
 )
-from utils.spinner import Spinner
 
 parser = argparse.ArgumentParser(description="Asta AI Companion")
 parser.add_argument("--setup", action="store_true")
@@ -42,28 +41,23 @@ def get_or_set_user_name() -> str:
 
 
 user_name = get_or_set_user_name()
-
-# FIX #1: simpan user_name ke cfg sementara agar load_model bisa akses,
-# TIDAK ditempel ke system_identity
 cfg["_user_name"] = user_name
 
-print(f"\n[Startup] Memuat model...")
+print("\n[Startup] Memuat model...")
 chat_manager = load_model(cfg)
 
 hybrid_mem = get_hybrid_memory()
-chat_manager.hybrid_memory  = hybrid_mem
-chat_manager.debug_thought  = args.debug
-
-# FIX #1: JANGAN lakukan ini lagi:
-# chat_manager.system_identity += f"\n- Nama pengguna: {user_name}."
-# Nama user sudah masuk lewat dynamic_system di setiap turn
+chat_manager.hybrid_memory = hybrid_mem
+chat_manager.debug_thought = args.debug
 
 # Status
 print("\n[Memory] Status:")
 core_text = hybrid_mem.core.get_summary()
-ep_count  = len([s for s in hybrid_mem.episodic.data
-                 if not __import__('numpy').allclose(
-                     __import__('numpy').array(s.get("embedding", [0])[:5]), 0.0)])
+import numpy as np
+ep_count = len([
+    s for s in hybrid_mem.episodic.data
+    if not np.allclose(np.array(s.get("embedding", [0])[:5]), 0.0)
+])
 print(f"  Core : {core_text[:80] + '...' if len(core_text) > 80 else core_text or '(kosong)'}")
 print(f"  Sesi : {ep_count} sesi valid tersimpan")
 
@@ -79,20 +73,18 @@ print(f"  Energy    : {asta_e.get('energy_level',0.8):.2f}")
 refs = chat_manager.self_model.data.get("reflection_history", [])
 if refs:
     print(f"  Refleksi  : {refs[-1].get('summary','–')[:60]}")
+
+long_mode = cfg.get("long_thinking_enabled", False)
+print(f"\n[Config] Long Thinking: {'ON' if long_mode else 'OFF'}")
 print()
-
-
-def clean_response(text: str) -> str:
-    text = re.sub(r"^\s*(Asta|Pengguna)\s*[:]?\s*", "", text.strip(),
-                  flags=re.IGNORECASE | re.MULTILINE)
-    return text.strip()
-
 
 print("=" * 50)
 print("  Asta siap! Ketik 'exit' untuk keluar.")
+print("  Perintah: !memory | !self | !thought | !web | !long | !reflect")
 if args.debug:
     print("  [DEBUG MODE] Internal thought ditampilkan.")
 print("=" * 50 + "\n")
+
 
 while True:
     sys.stdout.write("Kamu: ")
@@ -104,13 +96,9 @@ while True:
 
     if user_input.lower() == "exit":
         print("\n[Exit] Menyimpan sesi...")
-
-        # FIX #2: pakai _clean_conversation() agar tidak ada role:system
         conversation = chat_manager._clean_conversation()
-
         if conversation:
             hybrid_mem.extract_and_save_preferences(conversation)
-
         add_episodic(conversation)
         print("[Exit] Sesi disimpan ke episodic memory.")
 
@@ -119,12 +107,12 @@ while True:
         session_text = chat_manager.get_session_text()
         if session_text:
             print("[Exit] Memperbarui core memory di background...")
-            core_update_thread = hybrid_mem.update_core_async(
+            t = hybrid_mem.update_core_async(
                 llm_callable=chat_manager.llama.create_completion,
                 current_session_text=session_text,
             )
-            if core_update_thread:
-                core_update_thread.join(timeout=8)
+            if t:
+                t.join(timeout=8)
 
         print(f"\nDaa {user_name}! Asta tunggu kamu balik ya~ 💕\n")
         break
@@ -151,13 +139,20 @@ while True:
         print(f"[Config] Web search: {'ON' if cfg['web_search_enabled'] else 'OFF'}\n")
         continue
 
+    if user_input.lower() == "!long":
+        cfg["long_thinking_enabled"] = not cfg.get("long_thinking_enabled", False)
+        save_config(cfg)
+        chat_manager.cfg = cfg
+        print(f"[Config] Long thinking: {'ON' if cfg['long_thinking_enabled'] else 'OFF'}\n")
+        continue
+
     if user_input.lower() == "!reflect":
         print("[Manual] Menjalankan refleksi...")
         chat_manager.run_exit_reflection()
         continue
 
     try:
-        response = chat_manager.chat(user_input)
-        clean_response(response)
+        # chat() sekarang handle streaming sendiri via CLI mode (tanpa callback)
+        chat_manager.chat(user_input)
     except Exception as e:
         print(f"[Error] {e}\n")

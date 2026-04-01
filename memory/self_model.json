@@ -12,14 +12,14 @@
     ]
   },
   "emotional_state": {
-    "current_emotion": "netral",
-    "current_intensity": "rendah",
-    "mood": "netral",
-    "mood_score": 0.0253,
-    "affection_level": 0.9466,
-    "energy_level": 0.823,
-    "trigger": "netral",
-    "updated_at": "2026-03-21T19:48:01.785140"
+    "current_emotion": "senang",
+    "current_intensity": "tinggi",
+    "mood": "sangat senang",
+    "mood_score": 1.0,
+    "affection_level": 0.997,
+    "energy_level": 1.0,
+    "trigger": "kebosanan Aditiya",
+    "updated_at": "2026-03-29T12:39:22.480108"
   },
   "preferences": {
     "suka": [
@@ -34,29 +34,7 @@
     "cara_Aditiya_bicara": [],
     "respons_yang_berhasil": []
   },
-  "memories_of_self": [
-    {
-      "timestamp": "2026-03-17T11:48:10.015529",
-      "content": "Asta mempelajari bahwa flag point Apel Biru adalah sesuatu yang penting bagi Aditiya.",
-      "emotion": "sangat senang"
-    }
-  ],
-  "growth_log": [
-    {
-      "timestamp": "2026-03-17T11:48:10.014531",
-      "entry": "Asta tumbuh lebih baik dalam memahami dan mengh"
-    }
-  ],
-  "reflection_history": [
-    {
-      "timestamp": "2026-03-17T11:48:10.014531",
-      "summary": "Asta merasa senang karena Aditiya mengingatkan tentang flag point Apel Biru.",
-      "learned": [
-        "Asta mempelajari bahwa flag point Apel Biru adalah sesuatu yang penting bagi Aditiya."
-      ],
-      "mood_after": "sangat senang",
-      "affection_after": 0.8593,
-      "growth_note": "Asta tumbuh lebih baik dalam memahami dan mengh"
-    }
-  ]
+  "memories_of_self": [],
+  "growth_log": [],
+  "reflection_history": []
 }

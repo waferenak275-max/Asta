@@ -1,36 +1,47 @@
 import asyncio
 import json
-import threading
 import sys
 import io
+import threading
+from contextlib import asynccontextmanager
+from typing import Optional
 
-# Pastikan output menggunakan UTF-8 agar tidak error saat print simbol/emoji di Windows
-if sys.stdout.encoding.lower() != 'utf-8':
+# UTF-8 output agar tidak error di Windows
+if sys.stdout.encoding.lower() != "utf-8":
     try:
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except AttributeError:
-        # Fallback untuk lingkungan yang tidak mendukung reconfigure (Python < 3.7)
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+# ─── State Global ─────────────────────────────────────────────────────────────
+
 _chat_manager  = None
 _hybrid_memory = None
 _init_lock     = threading.Lock()
 _initialized   = False
+# Satu lock untuk mencegah dua request chat berjalan bersamaan pada ChatManager yang sama
+_chat_lock     = asyncio.Lock()
 
 
-def _initialize():
+# ─── Inisialisasi ─────────────────────────────────────────────────────────────
+
+def _initialize_sync() -> None:
+    """Jalankan di executor agar tidak block event loop."""
     global _chat_manager, _hybrid_memory, _initialized
+
     if _initialized:
         return
+
     with _init_lock:
         if _initialized:
             return
+
         from config import load_config
         from engine.model import load_model
         from engine.memory import get_hybrid_memory, get_identity
@@ -39,34 +50,49 @@ def _initialize():
         user_name = get_identity("nama_user") or "Aditiya"
         cfg["_user_name"] = user_name
 
-        chat_manager       = load_model(cfg)
-        hybrid_mem         = get_hybrid_memory()
-        chat_manager.hybrid_memory = hybrid_mem
+        manager    = load_model(cfg)
+        hybrid_mem = get_hybrid_memory()
+        manager.hybrid_memory = hybrid_mem
 
-        _chat_manager  = chat_manager
+        _chat_manager  = manager
         _hybrid_memory = hybrid_mem
         _initialized   = True
 
-def reload_model():
-    global _chat_manager, _initialized
-    with _init_lock:
-        from config import load_config
-        from engine.model import load_model
-        
-        cfg = load_config()
-        old_history = _chat_manager.conversation_history if _chat_manager else []
-        old_mem = _chat_manager.hybrid_memory if _chat_manager else _hybrid_memory
-        
-        # Load ulang model dengan config baru
-        new_manager = load_model(cfg)
-        new_manager.conversation_history = old_history
-        new_manager.hybrid_memory = old_mem
-        
-        _chat_manager = new_manager
-        print(f"\n[System] Interface model berhasil dimuat ulang dengan device: {cfg.get('device', 'cpu').upper()}\n")
-        sys.stdout.flush()
 
-app = FastAPI(title="Asta AI API")
+def _save_session_sync() -> int:
+    """Simpan sesi ke episodic memory. Aman dipanggil dari thread manapun."""
+    if not _initialized or not _chat_manager:
+        return 0
+    from engine.memory import add_episodic
+    conv = _chat_manager._clean_conversation()
+    if conv:
+        _hybrid_memory.extract_and_save_preferences(conv)
+        add_episodic(conv)
+        session_text = _chat_manager.get_session_text()
+        if session_text:
+            _hybrid_memory.update_core_async(
+                llm_callable=_chat_manager.llama.create_completion,
+                current_session_text=session_text,
+            )
+    return len(conv)
+
+
+# ─── Lifespan (menggantikan @on_event yang deprecated) ────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: load model di thread pool agar event loop tidak block
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _initialize_sync)
+    yield
+    # Shutdown: simpan sesi terakhir
+    if _initialized:
+        await loop.run_in_executor(None, _save_session_sync)
+
+
+# ─── App ──────────────────────────────────────────────────────────────────────
+
+app = FastAPI(title="Asta AI API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -75,12 +101,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ─── Guard decorator ──────────────────────────────────────────────────────────
 
-@app.on_event("startup")
-async def startup_event():
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _initialize)
+def _require_initialized():
+    if not _initialized:
+        return JSONResponse({"error": "Model belum siap."}, status_code=503)
+    return None
 
+
+# ─── REST Endpoints ───────────────────────────────────────────────────────────
 
 @app.get("/status")
 async def status():
@@ -91,23 +120,25 @@ async def status():
         s for s in _hybrid_memory.episodic.data
         if not np.allclose(np.array(s.get("embedding", [0])[:5]), 0.0)
     ])
-    sep = _chat_manager.llama_thought is not _chat_manager.llama
+    is_dual = _chat_manager.llama_thought is not _chat_manager.llama
     return {
         "ready":             True,
         "model":             _chat_manager.cfg.get("model_choice", "?"),
         "device":            _chat_manager.cfg.get("device", "cpu"),
-        "user_name":         _chat_manager._user_name_cache,
+        "user_name":         _chat_manager._user_name,
         "episodic_sessions": ep_count,
-        "dual_model":        sep,
-        "thought_model":     "3B" if sep else "shared",
+        "dual_model":        is_dual,
+        "thought_model":     "3B" if is_dual else "shared",
         "response_model":    "8B" if _chat_manager.cfg.get("model_choice", "2") == "2" else "3B",
+        "long_thinking":     _chat_manager.cfg.get("long_thinking_enabled", False),
     }
 
 
 @app.get("/memory")
 async def get_memory():
-    if not _initialized:
-        return JSONResponse({"error": "not initialized"}, status_code=503)
+    err = _require_initialized()
+    if err:
+        return err
     core_text    = _hybrid_memory.core.get_context_text()
     recent_facts = _hybrid_memory.episodic.get_recent_facts_text(n_sessions=3, max_facts=10)
     profile      = _hybrid_memory.core.get_profile()
@@ -130,8 +161,9 @@ async def get_memory():
 
 @app.get("/self")
 async def get_self_model():
-    if not _initialized:
-        return JSONResponse({"error": "not initialized"}, status_code=503)
+    err = _require_initialized()
+    if err:
+        return err
     sm   = _chat_manager.self_model
     comb = _chat_manager.emotion_manager.get_combined()
     refs = sm.data.get("reflection_history", [])
@@ -149,98 +181,112 @@ async def get_self_model():
 
 @app.get("/emotion")
 async def get_emotion():
-    if not _initialized:
-        return JSONResponse({"error": "not initialized"}, status_code=503)
+    err = _require_initialized()
+    if err:
+        return err
     return _chat_manager.emotion_manager.get_combined()
 
 
 @app.get("/config")
 async def get_config():
-    if not _initialized:
-        return JSONResponse({"error": "not initialized"}, status_code=503)
-    # Cek apakah memang ada dua objek llama yang berbeda (RAM terpisah)
-    is_sep = _chat_manager.llama_thought is not _chat_manager.llama
+    err = _require_initialized()
+    if err:
+        return err
+    is_dual = _chat_manager.llama_thought is not _chat_manager.llama
     return {
         "internal_thought_enabled": _chat_manager.cfg.get("internal_thought_enabled", True),
         "web_search_enabled":       _chat_manager.cfg.get("web_search_enabled", True),
         "separate_thought_model":   _chat_manager.cfg.get("separate_thought_model", True),
+        "long_thinking_enabled":    _chat_manager.cfg.get("long_thinking_enabled", False),
         "device":                   _chat_manager.cfg.get("device", "cpu"),
-        "dual_model":               is_sep,
-        "thought_model":            "3B" if is_sep else "shared",
+        "dual_model":               is_dual,
+        "thought_model":            "3B" if is_dual else "shared",
         "response_model":           "8B" if _chat_manager.cfg.get("model_choice", "2") == "2" else "3B",
     }
 
 
 @app.post("/config/thought")
 async def toggle_thought():
-    if not _initialized:
-        return JSONResponse({"error": "not initialized"}, status_code=503)
+    err = _require_initialized()
+    if err:
+        return err
     from config import save_config
-    cur = _chat_manager.cfg.get("internal_thought_enabled", True)
-    _chat_manager.cfg["internal_thought_enabled"] = not cur
+    _chat_manager.cfg["internal_thought_enabled"] = \
+        not _chat_manager.cfg.get("internal_thought_enabled", True)
     save_config(_chat_manager.cfg)
     return {"internal_thought_enabled": _chat_manager.cfg["internal_thought_enabled"]}
 
+
+@app.post("/config/long_thinking")
+async def toggle_long_thinking():
+    """Toggle fitur long thinking on/off."""
+    err = _require_initialized()
+    if err:
+        return err
+    from config import save_config
+    _chat_manager.cfg["long_thinking_enabled"] = \
+        not _chat_manager.cfg.get("long_thinking_enabled", False)
+    save_config(_chat_manager.cfg)
+    return {"long_thinking_enabled": _chat_manager.cfg["long_thinking_enabled"]}
+
+
 @app.post("/config/separate_thought")
 async def toggle_separate_thought():
-    if not _initialized:
-        return JSONResponse({"error": "not initialized"}, status_code=503)
+    err = _require_initialized()
+    if err:
+        return err
     from config import save_config
-    cur = _chat_manager.cfg.get("separate_thought_model", True)
-    _chat_manager.cfg["separate_thought_model"] = not cur
+    _chat_manager.cfg["separate_thought_model"] = \
+        not _chat_manager.cfg.get("separate_thought_model", True)
     save_config(_chat_manager.cfg)
     return {"separate_thought_model": _chat_manager.cfg["separate_thought_model"]}
 
+
 @app.post("/config/device")
 async def toggle_device():
-    if not _initialized:
-        return JSONResponse({"error": "not initialized"}, status_code=503)
+    err = _require_initialized()
+    if err:
+        return err
     from config import save_config
-    
-    cur = _chat_manager.cfg.get("device", "cpu")
+    from engine.web_tools import invalidate_cfg_cache
+    cur        = _chat_manager.cfg.get("device", "cpu")
     new_device = "gpu" if cur == "cpu" else "cpu"
-    
-    print(f"\n[System] Interface berubah dari {cur.upper()} ke {new_device.upper()}. Memuat ulang model via Watcher...")
+    print(f"\n[System] Device: {cur.upper()} → {new_device.upper()}. Restart diperlukan.")
     sys.stdout.flush()
-    
     _chat_manager.cfg["device"] = new_device
     save_config(_chat_manager.cfg)
-    
-    # Tidak perlu reload_model() di sini. 
-    # Uvicorn --reload akan mendeteksi perubahan config.json dan me-restart proses ini.
-    
+    invalidate_cfg_cache()
     return {"device": new_device}
 
 
 @app.post("/save")
 async def save_session():
-    if not _initialized:
-        return JSONResponse({"error": "not initialized"}, status_code=503)
-    from engine.memory import add_episodic
-    conv = _chat_manager._clean_conversation()
-    if conv:
-        _hybrid_memory.extract_and_save_preferences(conv)
-        add_episodic(conv)
-        session_text = _chat_manager.get_session_text()
-        if session_text:
-            _hybrid_memory.update_core_async(
-                llm_callable=_chat_manager.llama.create_completion,
-                current_session_text=session_text,
-            )
-    return {"saved": len(conv)}
+    err = _require_initialized()
+    if err:
+        return err
+    loop    = asyncio.get_event_loop()
+    saved_n = await loop.run_in_executor(None, _save_session_sync)
+    return {"saved": saved_n}
 
 
 @app.post("/reflect")
 async def trigger_reflection():
-    if not _initialized:
-        return JSONResponse({"error": "not initialized"}, status_code=503)
+    err = _require_initialized()
+    if err:
+        return err
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, _chat_manager.run_exit_reflection)
     return {"status": "done"}
 
 
+# ─── WebSocket: Terminal ──────────────────────────────────────────────────────
+
 @app.websocket("/ws/terminal")
 async def terminal_socket(websocket: WebSocket):
+    """
+    Terminal WebSocket untuk keperluan lokal/development.
+    PERINGATAN: Tidak ada autentikasi — jangan expose ke publik.
+    """
     await websocket.accept()
     import os
     import subprocess
@@ -254,8 +300,10 @@ async def terminal_socket(websocket: WebSocket):
             if not cmd_raw.strip():
                 continue
 
-            # Handle 'cd' manually to maintain state
             parts = shlex.split(cmd_raw)
+            if not parts:
+                continue
+
             if parts[0] in ("cls", "clear"):
                 await websocket.send_text("[CLEAR_SIGNAL]")
                 await websocket.send_text(f"> {cwd} $ ")
@@ -264,15 +312,14 @@ async def terminal_socket(websocket: WebSocket):
             if parts[0] == "cd":
                 if len(parts) > 1:
                     new_path = os.path.abspath(os.path.join(cwd, parts[1]))
-                    if os.path.exists(new_path) and os.path.isdir(new_path):
+                    if os.path.isdir(new_path):
                         cwd = new_path
-                        await websocket.send_text(f"\n[CWD updated to: {cwd}]\n")
+                        await websocket.send_text(f"\n[CWD: {cwd}]\n")
                     else:
                         await websocket.send_text(f"\nDirectory not found: {parts[1]}\n")
                 continue
 
             try:
-                # Run command in CMD
                 process = subprocess.Popen(
                     cmd_raw,
                     shell=True,
@@ -281,23 +328,21 @@ async def terminal_socket(websocket: WebSocket):
                     stderr=subprocess.STDOUT,
                     text=True,
                     bufsize=1,
-                    universal_newlines=True
+                    universal_newlines=True,
                 )
-
                 for line in process.stdout:
                     await websocket.send_text(line)
-                
                 process.stdout.close()
-                return_code = process.wait()
-                
-                # Send prompt signal for frontend
+                process.wait()
                 await websocket.send_text(f"\n> {cwd} $ ")
-
             except Exception as e:
-                await websocket.send_text(f"\nError: {str(e)}\n")
+                await websocket.send_text(f"\nError: {e}\n")
 
     except WebSocketDisconnect:
         pass
+
+
+# ─── WebSocket: Chat ──────────────────────────────────────────────────────────
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
@@ -306,221 +351,156 @@ async def websocket_chat(websocket: WebSocket):
 
     try:
         while True:
-            raw = await websocket.receive_text()
+            # Terima pesan dari client
             try:
+                raw        = await websocket.receive_text()
                 data       = json.loads(raw)
                 user_input = data.get("message", "").strip()
-                if not user_input:
-                    continue
             except json.JSONDecodeError:
-                user_input = raw.strip()
+                user_input = raw.strip() if raw else ""
+
+            if not user_input:
+                continue
 
             if not _initialized:
-                await websocket.send_text(json.dumps({"type": "error", "text": "Model belum siap."}))
+                await websocket.send_text(
+                    json.dumps({"type": "error", "text": "Model belum siap."})
+                )
                 continue
 
             await websocket.send_text(json.dumps({"type": "thinking_start"}))
 
-            thought_holder = {}
-            emotion_holder = {}
-            asta_holder    = {}
-            chunk_queue    = asyncio.Queue()
+            # Queue untuk komunikasi antara thread dan async loop
+            chunk_queue: asyncio.Queue = asyncio.Queue()
 
-            async def _run_chat_wrapper():
+            async def _process_and_stream():
+                """
+                Satu fungsi yang menangani seluruh pipeline:
+                thought → notify → generate → stream chunks.
+                Semua exception tertangkap dan dikirim ke queue.
+                """
                 try:
-                    import datetime
-                    from engine.thought import run_thought_pass, extract_recent_context
-                    from engine.web_tools import search_and_summarize
+                    # Gunakan lock agar tidak ada dua request berjalan bersamaan
+                    async with _chat_lock:
+                        thought_data: dict = {}
 
-                    cm  = _chat_manager
-                    now = datetime.datetime.now()
-                    ts  = now.strftime("%A, %d %B %Y %H:%M WIB")
+                        def thinking_callback(thought: dict) -> None:
+                            """Dipanggil oleh chat() setelah thought selesai."""
+                            thought_data.update(thought)
+                            is_dual = _chat_manager.llama_thought is not _chat_manager.llama
+                            payload = {
+                                "type": "thought",
+                                "data": {
+                                    "topic":              thought.get("topic", ""),
+                                    "sentiment":          thought.get("sentiment", ""),
+                                    "urgency":            thought.get("urgency", ""),
+                                    "asta_emotion":       thought.get("asta_emotion", ""),
+                                    "asta_trigger":       thought.get("asta_trigger", ""),
+                                    "should_express":     thought.get("should_express", False),
+                                    "reasoning":          thought.get("reasoning", ""),
+                                    "need_search":        thought.get("need_search", False),
+                                    "search_query":       thought.get("search_query", ""),
+                                    "web_result":         thought.get("web_result", ""),
+                                    "recall_topic":       thought.get("recall_topic", ""),
+                                    "use_memory":         thought.get("use_memory", False),
+                                    "recall_source":      thought.get("recall_source", "none"),
+                                    "tone":               thought.get("tone", ""),
+                                    "note":               thought.get("note", ""),
+                                    "response_style":     thought.get("response_style", ""),
+                                    "is_long_thinking":   thought.get("is_long_thinking", False),
+                                    "hidden_need":        thought.get("hidden_need", ""),
+                                    "response_structure": thought.get("response_structure", ""),
+                                    "emotion": _chat_manager.emotion_manager.get_state(),
+                                    "asta_state": _chat_manager.emotion_manager.get_asta_dict(),
+                                    "model_info": {
+                                        "dual_model":     is_dual,
+                                        "thought_model":  "3B" if is_dual else "shared",
+                                        "response_model": (
+                                            "8B"
+                                            if _chat_manager.cfg.get("model_choice", "2") == "2"
+                                            else "3B"
+                                        ),
+                                    },
+                                },
+                            }
+                            # Kirim thought ke queue secara thread-safe
+                            loop.call_soon_threadsafe(
+                                chunk_queue.put_nowait,
+                                {"type": "thought_payload", "payload": payload},
+                            )
 
-                    # [1] Memory Hint (RINGAN) untuk thought
-                    memory_hint = cm._get_memory_hint(query=user_input)
+                        def stream_callback(text: str) -> None:
+                            """Dipanggil oleh chat() tiap token."""
+                            loop.call_soon_threadsafe(
+                                chunk_queue.put_nowait,
+                                {"type": "chunk", "text": text},
+                            )
 
-                    recent_ctx = extract_recent_context(cm.conversation_history, n=2)
-                    em_dict    = cm.emotion_manager.update(user_input, recent_context=recent_ctx)
-
-                    thought = {
-                        "topic": "", "sentiment": "netral", "urgency": "normal",
-                        "asta_emotion": "netral", "asta_trigger": "", "should_express": False,
-                        "need_search": False, "search_query": "", "recall_topic": "", "use_memory": False,
-                        "recall_source": "none", "tone": "romantic", "note": "", "raw": "",
-                    }
-
-                    emotion_guidance = ""
-                    memory_ctx = ""
-                    web_result = ""
-
-                    if cm.cfg.get("internal_thought_enabled", True):
-                        cm._maybe_reset_thought_kv()
-                        thought = run_thought_pass(
-                            llm=cm.llama_thought,
-                            user_input=user_input,
-                            memory_context=memory_hint,
-                            recent_context=recent_ctx,
-                            web_search_enabled=cm.cfg.get("web_search_enabled", True),
-                            max_tokens=1024,
-                            user_name=cm._user_name_cache,
-                            emotion_state=(
-                                f"emosi={em_dict['user_emotion']}; "
-                                f"intensitas={em_dict['intensity']}; "
-                                f"tren={em_dict['trend']}"
+                        # Jalankan chat() di thread executor (blocking)
+                        await loop.run_in_executor(
+                            None,
+                            lambda: _chat_manager.chat(
+                                user_input=user_input,
+                                stream_callback=stream_callback,
+                                thinking_callback=thinking_callback,
                             ),
-                            asta_state=cm.emotion_manager.get_asta_dict(),
-                            cfg=cm.cfg,
                         )
-                        em_dict = cm.emotion_manager.refine_with_thought(thought)
 
-                        cm.emotion_manager.update_asta_emotion(thought)
-                        cm.self_model.sync_emotion(cm.emotion_manager.get_asta_dict())
-
-                        thought_holder["thought"] = thought
-                        emotion_holder["emotion"] = em_dict
-                        asta_holder["asta"]       = cm.emotion_manager.get_asta_dict()
-
-                        emotion_guidance = cm.emotion_manager.build_prompt_context()
-
-                        # [2] Memory Context & Search hanya aktif jika Thought ON
-                        memory_ctx = cm._get_memory_context(query=user_input)
-                        memory_ctx = cm._enrich_memory_context(memory_ctx, thought, user_input)
-                        
-                        if (cm.cfg.get("web_search_enabled", True)
-                                and thought["need_search"]
-                                and thought.get("search_query")):
-                            web_result = search_and_summarize(
-                                thought["search_query"], max_results=2, timeout=5)
-                            if web_result and cm.hybrid_memory and getattr(cm.hybrid_memory, "semantic", None):
-                                cm.hybrid_memory.semantic.remember_web_result(
-                                    thought["search_query"],
-                                    web_result,
-                                )
-                            if not web_result:
-                                web_result = "[INFO] Web search gagal."
-                        
-                        thought["web_result"] = web_result
-                    else:
-                        # Mode Pure: Tetap sadar emosi user tapi sangat ringan
-                        # Kita ambil hanya baris terakhir dari guidance (status emosi)
-                        full_guidance = cm.emotion_manager.build_prompt_context()
-                        if full_guidance:
-                            emotion_guidance = full_guidance.split("\n")[-1] # Ambil baris "User sedang..."
-                        
-                        thought_holder["thought"] = thought
-                        emotion_holder["emotion"] = em_dict
-                        asta_holder["asta"]       = cm.emotion_manager.get_asta_dict()
-
-                    # Tampilkan debug thought di terminal jika diaktifkan
-                    from engine.thought import format_thought_debug
-                    print(format_thought_debug(thought, web_result=web_result))
-                    sys.stdout.flush()
-
-                    static_system   = {"role": "system", "content": cm.system_identity}
-                    dynamic_context = cm._build_dynamic_context(
-                        timestamp_str=ts,
-                        memory_ctx=memory_ctx,
-                        web_result=web_result,
-                        emotion_guidance=emotion_guidance,
-                        thought_note=thought.get("note", ""),
-                        thought=thought,
+                    # Selesai
+                    loop.call_soon_threadsafe(
+                        chunk_queue.put_nowait, {"type": "done"}
                     )
-
-                    cm.conversation_history.append({"role": "user", "content": user_input})
-
-                    messages_to_send, _ = cm.budget_manager.build_messages(
-                        system_identity=static_system,
-                        memory_messages=[],
-                        conversation_history=cm.conversation_history,
-                        dynamic_context=dynamic_context,
-                    )
-
-                    sep = cm.llama_thought is not cm.llama
-                    await chunk_queue.put({"type": "thought_ready"})
-
-                    # Jalankan seluruh proses pembuatan respon di thread agar tidak memblokir loop async
-                    def generate_and_push():
-                        response_stream = cm.llama.create_chat_completion(
-                            messages=messages_to_send,
-                            max_tokens=128,
-                            temperature=0.7,
-                            top_p=0.85,
-                            top_k=60,
-                            stop=["<|im_end|>", "<|endoftext|>"],
-                            stream=True,
-                        )
-                        
-                        full_resp = ""
-                        for chunk in response_stream:
-                            delta = chunk["choices"][0]["delta"]
-                            if "content" in delta:
-                                text = delta["content"]
-                                full_resp += text
-                                # Kirim chunk ke queue secara thread-safe
-                                loop.call_soon_threadsafe(chunk_queue.put_nowait, {"type": "chunk", "text": text})
-                        
-                        cm.conversation_history.append({"role": "assistant", "content": full_resp})
-                        loop.call_soon_threadsafe(chunk_queue.put_nowait, {"type": "done"})
-
-                    await loop.run_in_executor(None, generate_and_push)
 
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
-                    await chunk_queue.put({"type": "error", "text": f"Gagal memproses pesan: {str(e)}"})
+                    loop.call_soon_threadsafe(
+                        chunk_queue.put_nowait,
+                        {"type": "error", "text": f"Error: {e}"},
+                    )
 
-            # Jalankan wrapper sebagai task
-            asyncio.create_task(_run_chat_wrapper())
+            # Jalankan pipeline sebagai task terpisah
+            task = asyncio.create_task(_process_and_stream())
 
-            while True:
-                item = await chunk_queue.get()
-                if item["type"] == "error":
-                    await websocket.send_text(json.dumps({"type": "error", "text": item["text"]}))
-                    break
+            # Konsumsi queue dan forward ke WebSocket
+            stream_started = False
+            try:
+                while True:
+                    try:
+                        # Timeout guard: jika tidak ada item dalam 120 detik, anggap hang
+                        item = await asyncio.wait_for(chunk_queue.get(), timeout=120.0)
+                    except asyncio.TimeoutError:
+                        await websocket.send_text(
+                            json.dumps({"type": "error", "text": "Timeout: response terlalu lama."})
+                        )
+                        task.cancel()
+                        break
 
-                if item["type"] == "thought_ready":
-                    thought = thought_holder.get("thought", {})
-                    emotion = emotion_holder.get("emotion", {})
-                    asta    = asta_holder.get("asta", {})
-                    sep     = _chat_manager.llama_thought is not _chat_manager.llama
-                    await websocket.send_text(json.dumps({
-                        "type": "thought",
-                        "data": {
-                            "topic":          thought.get("topic", ""),
-                            "sentiment":      thought.get("sentiment", ""),
-                            "urgency":        thought.get("urgency", ""),
-                            "asta_emotion":   thought.get("asta_emotion", ""),
-                            "asta_trigger":   thought.get("asta_trigger", ""),
-                            "should_express": thought.get("should_express", False),
-                            "need_search":    thought.get("need_search", False),
-                            "search_query":   thought.get("search_query", ""),
-                            "web_result":     thought.get("web_result", ""),
-                            "recall_topic":   thought.get("recall_topic", ""),
-                            "use_memory":     thought.get("use_memory", False),
-                            "recall_source":  thought.get("recall_source", "none"),
-                            "tone":           thought.get("tone", ""),
-                            "note":           thought.get("note", ""),
-                            "response_style": thought.get("response_style", ""),
-                            "emotion":        emotion,
-                            "asta_state":     asta,
-                            "model_info": {
-                                "dual_model":     sep,
-                                "thought_model":  "3B" if sep else "shared",
-                                "response_model": "8B" if _chat_manager.cfg.get("model_choice","2")=="2" else "3B",
-                            },
-                        }
-                    }))
-                    await websocket.send_text(json.dumps({"type": "stream_start"}))
+                    if item["type"] == "error":
+                        await websocket.send_text(json.dumps({"type": "error", "text": item["text"]}))
+                        break
 
-                elif item["type"] == "chunk":
-                    await websocket.send_text(json.dumps({"type": "chunk", "text": item["text"]}))
+                    elif item["type"] == "thought_payload":
+                        await websocket.send_text(json.dumps(item["payload"]))
+                        await websocket.send_text(json.dumps({"type": "stream_start"}))
+                        stream_started = True
 
-                elif item["type"] == "done":
-                    await websocket.send_text(json.dumps({"type": "stream_end"}))
-                    break
+                    elif item["type"] == "chunk":
+                        await websocket.send_text(json.dumps({"type": "chunk", "text": item["text"]}))
+
+                    elif item["type"] == "done":
+                        await websocket.send_text(json.dumps({"type": "stream_end"}))
+                        break
+
+            except WebSocketDisconnect:
+                # Simpan sesi jika user disconnect mendadak
+                task.cancel()
+                await loop.run_in_executor(None, _save_session_sync)
+                return
 
     except WebSocketDisconnect:
-        pass
+        # Simpan sesi jika koneksi terputus di level luar
+        await loop.run_in_executor(None, _save_session_sync)
     except Exception as e:
         try:
             await websocket.send_text(json.dumps({"type": "error", "text": str(e)}))
