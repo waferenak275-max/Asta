@@ -59,11 +59,11 @@ User Input → [Thought Model: Pass 1 + Pass 2] → [Response Model] → Output
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                     Electron UI                         │
-│  (React + Vite · WebSocket · Dark/Light Mode)          │
-└───────────────────────┬─────────────────────────────────┘
-                        │ WebSocket ws://localhost:8000
-┌───────────────────────▼─────────────────────────────────┐
-│                  FastAPI Backend (api.py)               │
+│     (React + Vite · WebSocket · Dark/Light Mode)        │
+└─────────────────────────┬───────────────────────────────┘
+                          │   WebSocket ws://localhost:8000
+┌─────────────────────────▼───────────────────────────────┐
+│                FastAPI Backend (api.py)                 │
 │                                                         │
 │  ┌──────────────┐    ┌──────────────────────────────┐   │
 │  │ Thought Model│    │      Response Model          │   │
@@ -72,16 +72,16 @@ User Input → [Thought Model: Pass 1 + Pass 2] → [Response Model] → Output
 │  └──────────────┘    └──────────────────────────────┘   │
 │                                                         │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │              Engine Layer                        │   │
-│  │  emotion_state · memory_system · self_model      │   │
-│  │  thought · token_budget · web_tools              │   │
+│  │                  Engine Layer                    │   │
+│  │    emotion_state · memory_system · self_model    │   │
+│  │    thought · token_budget · web_tools            │   │
 │  └──────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────┘
-                        │
-┌───────────────────────▼─────────────────────────────────┐
+                          │
+┌─────────────────────────▼───────────────────────────────┐
 │                  Memory Layer (JSON)                    │
-│  episodic.json · core_memory.json · semantic.json       │
-│  self_model.json · identity.json (semantic facts)       │
+│    episodic.json · core_memory.json · semantic.json     │
+│    self_model.json · identity.json (semantic facts)     │
 └─────────────────────────────────────────────────────────┘
 ```
 
