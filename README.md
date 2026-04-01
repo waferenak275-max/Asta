@@ -63,23 +63,23 @@ User Input → [Thought Model: Pass 1 + Pass 2] → [Response Model] → Output
 └───────────────────────┬─────────────────────────────────┘
                         │ WebSocket ws://localhost:8000
 ┌───────────────────────▼─────────────────────────────────┐
-│                  FastAPI Backend (api.py)                │
+│                  FastAPI Backend (api.py)               │
 │                                                         │
-│  ┌──────────────┐    ┌──────────────────────────────┐  │
-│  │ Thought Model│    │      Response Model          │  │
-│  │ (Qwen3 4B)   │───▶│  (Sailor2 8B / Qwen3 4B)    │  │
-│  │  Pass 1 + 2  │    │   + LoRA Adapter (opsional)  │  │
-│  └──────────────┘    └──────────────────────────────┘  │
+│  ┌──────────────┐    ┌──────────────────────────────┐   │
+│  │ Thought Model│    │      Response Model          │   │
+│  │ (Qwen3 4B)   │───▶│  (Sailor2 8B / Qwen3 4B)    │   │
+│  │  Pass 1 + 2  │    │   + LoRA Adapter (opsional)  │   │
+│  └──────────────┘    └──────────────────────────────┘   │
 │                                                         │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │              Engine Layer                        │  │
-│  │  emotion_state · memory_system · self_model      │  │
-│  │  thought · token_budget · web_tools              │  │
-│  └──────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │              Engine Layer                        │   │
+│  │  emotion_state · memory_system · self_model      │   │
+│  │  thought · token_budget · web_tools              │   │
+│  └──────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────┘
                         │
 ┌───────────────────────▼─────────────────────────────────┐
-│                  Memory Layer (JSON)                     │
+│                  Memory Layer (JSON)                    │
 │  episodic.json · core_memory.json · semantic.json       │
 │  self_model.json · identity.json (semantic facts)       │
 └─────────────────────────────────────────────────────────┘
@@ -458,4 +458,4 @@ Proyek ini bersifat personal/eksperimental. Penggunaan model pihak ketiga (Sailo
 
 ---
 
-*Dibuat dengan ♡ untuk Aditiya*
+*Dibuat dengan ♡ dari Aditiya*
