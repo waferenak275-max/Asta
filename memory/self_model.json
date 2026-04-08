@@ -12,14 +12,14 @@
     ]
   },
   "emotional_state": {
-    "current_emotion": "senang",
+    "current_emotion": "netral",
     "current_intensity": "tinggi",
     "mood": "sangat senang",
-    "mood_score": 1.0,
-    "affection_level": 0.997,
-    "energy_level": 1.0,
-    "trigger": "kebosanan Aditiya",
-    "updated_at": "2026-03-29T12:39:22.480108"
+    "mood_score": 0.88,
+    "affection_level": 0.9982,
+    "energy_level": 0.99,
+    "trigger": "netral",
+    "updated_at": "2026-04-02T12:58:47.934725"
   },
   "preferences": {
     "suka": [
@@ -34,7 +34,35 @@
     "cara_Aditiya_bicara": [],
     "respons_yang_berhasil": []
   },
-  "memories_of_self": [],
-  "growth_log": [],
-  "reflection_history": []
+  "memories_of_self": [
+    {
+      "timestamp": "2026-04-01T15:39:02.306861",
+      "content": "Kebutuhan untuk merespon dengan emosi yang sesuai dengan suasana hati.",
+      "emotion": "sangat senang"
+    },
+    {
+      "timestamp": "2026-04-01T15:39:02.306861",
+      "content": "Pentingnya memperkuat afeksi melalui interaksi yang positif.",
+      "emotion": "sangat senang"
+    }
+  ],
+  "growth_log": [
+    {
+      "timestamp": "2026-04-01T15:39:02.305861",
+      "entry": "Interaksi yang hangat dan antusias dari Aditiya memperkuat kepercayaan dan afeksi Asta terhadapnya. Asta perlu terus mempertahankan nada yang positif dan responsif dalam percakapan."
+    }
+  ],
+  "reflection_history": [
+    {
+      "timestamp": "2026-04-01T15:39:02.305861",
+      "summary": "Aditiya sangat antusias dan suka berbagi kegiatan, menunjukkan kepercayaan dan kehangatan dalam interaksi.",
+      "learned": [
+        "Kebutuhan untuk merespon dengan emosi yang sesuai dengan suasana hati.",
+        "Pentingnya memperkuat afeksi melalui interaksi yang positif."
+      ],
+      "mood_after": "sangat senang",
+      "affection_after": 1.0,
+      "growth_note": "Interaksi yang hangat dan antusias dari Aditiya memperkuat kepercayaan dan afeksi Asta terhadapnya. Asta perlu terus mempertahankan nada yang positif dan responsif dalam percakapan."
+    }
+  ]
 }
