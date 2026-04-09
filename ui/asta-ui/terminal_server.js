@@ -32,7 +32,6 @@ function getCpuUsage() {
     return deltaTotal === 0 ? "0.0" : ((1 - deltaIdle / deltaTotal) * 100).toFixed(1);
 }
 
-// Menghitung Disk Utilization (% Idle Time terbalik)
 function getDiskUtilization() {
     return new Promise((resolve) => {
         const cmd = spawn('wmic', ['path', 'Win32_PerfFormattedData_PerfDisk_LogicalDisk', 'where', 'Name="_Total"', 'get', 'PercentDiskTime', '/format:list'], { shell: true });
@@ -45,7 +44,6 @@ function getDiskUtilization() {
                 const parts = l.trim().split('=');
                 if (parts[0] === 'PercentDiskTime') util = parts[1];
             });
-            // WMIC terkadang mengembalikan nilai > 100 untuk Disk Time jika multi-disk, kita batasi
             const val = parseInt(util) || 0;
             resolve(Math.min(val, 100).toFixed(1));
         });

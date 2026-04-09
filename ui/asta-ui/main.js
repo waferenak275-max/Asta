@@ -89,7 +89,6 @@ function startBackend() {
     return;
   }
 
-  // Tambahkan --reload jika ingin auto-restart, tapi uvicorn --reload akan buat sub-proses baru
   const args = ['-m', 'uvicorn', 'api:app', '--host', '0.0.0.0', '--port', '8000'];
 
   backendProcess = spawn(pythonPath, args, {
@@ -101,7 +100,6 @@ function startBackend() {
   backendProcess.stdout.on('data', (data) => {
     const msg = data.toString();
     console.log(`[Backend] ${msg}`);
-    // Kirim ke Terminal via IPC jika ada jendela terbuka
     if (mainWindow) {
         mainWindow.webContents.send('backend-out', msg);
     }
@@ -136,7 +134,6 @@ ipcMain.on('stop-backend', () => stopBackend());
 ipcMain.on('restart-backend', () => {
     console.log("[Main] Restarting backend for device/config change...");
     stopBackend();
-    // Beri jeda 1.5 detik agar port 8000 benar-benar lepas dan VRAM/RAM bersih
     setTimeout(() => {
         startBackend();
     }, 1500);
