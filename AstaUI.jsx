@@ -97,11 +97,8 @@ if (!document.getElementById("asta-css")) {
   document.head.appendChild(t);
 }
 
-// ── FIX #4: Inline markdown renderer ─────────────────────────────────────────
-// Renders **bold**, *italic*, `code` within a single line segment.
 function renderInline(text) {
   const parts = [];
-  // Split on **bold**, *italic*, `code`
   const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`)/g;
   let last = 0;
   let m;
@@ -116,10 +113,7 @@ function renderInline(text) {
   return parts;
 }
 
-// FIX #4: Full message renderer — splits by newline, renders each line with inline markdown.
-// Also strips leading "Asta:" prefix that might slip through.
 function MessageContent({ content }) {
-  // Strip residual "Asta:" / "**Asta:**" prefix
   const clean = content.replace(/^\*{0,2}Asta\*{0,2}\s*:\s*/i, "").trimStart();
   const lines = clean.split("\n");
   return (
@@ -514,8 +508,7 @@ export default function AstaUI() {
   );
 }
 
-// ── Primitives ────────────────────────────────────────────────────────────────
-
+// Primitives
 function Divider() {
   return <div style={{width:1,height:18,background:"var(--border)",flexShrink:0}}/>;
 }
@@ -552,8 +545,7 @@ function SidePanel({ visible, side, title, icon, width=260, noPadding=false, chi
   );
 }
 
-// ── Terminal ──────────────────────────────────────────────────────────────────
-
+// Terminal
 function TerminalPanel({ visible, onMessage }) {
   const [lines,  setLines]  = useState(["Asta Terminal Ready.", ""]);
   const [input,  setInput]  = useState("");
@@ -618,8 +610,7 @@ function TerminalPanel({ visible, onMessage }) {
   );
 }
 
-// ── Chat components ───────────────────────────────────────────────────────────
-
+// Chat components
 function Avatar({ emoAsta }) {
   const isSym = emoAsta.emoji==="*";
   return (
@@ -680,7 +671,6 @@ function Bubble({ msg, isStreaming }) {
           textAlign:"left",
           width:"100%",
         }}>
-          {/* FIX #4: Gunakan MessageContent untuk rendering markdown */}
           {isStreaming && msg.tokens
             ? <>{msg.tokens.map(t=><span key={t.id} className="stream-token">{t.text}</span>)}<Cursor/></>
             : isUser
@@ -746,8 +736,7 @@ function StatBar({ label, value, color }) {
   );
 }
 
-// ── Thought Panel ─────────────────────────────────────────────────────────────
-
+// Thought Panel
 function ThoughtPanel({ thought, thinking, modelInfo }) {
   if (thinking) return (
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",paddingTop:40}}>
@@ -844,8 +833,7 @@ function ThoughtPanel({ thought, thinking, modelInfo }) {
   );
 }
 
-// ── Self Panel ────────────────────────────────────────────────────────────────
-
+// Self Panel
 function SelfPanel({ selfModel, astaEmotion, onReflect }) {
   if (!selfModel) return <div style={{color:"var(--muted)",fontSize:12,textAlign:"center",paddingTop:40}}>Memuat…</div>;
   const emo    = getEmo(astaEmotion.current_emotion || astaEmotion.mood);
@@ -933,8 +921,7 @@ function SelfPanel({ selfModel, astaEmotion, onReflect }) {
   );
 }
 
-// ── Memory Panel ──────────────────────────────────────────────────────────────
-
+// Memory Panel
 function MemoryPanel({ memory, onRefresh }) {
   if (!memory) return <div style={{color:"var(--muted)",fontSize:13,textAlign:"center",paddingTop:40}}>Memuat…</div>;
   return (
@@ -979,8 +966,7 @@ function MemoryPanel({ memory, onRefresh }) {
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-
+// Styles
 const S = {
   root:           {display:"flex",flexDirection:"column",width:"100%",height:"100vh",overflow:"hidden",background:"var(--bg)"},
   topBar:         {display:"flex",alignItems:"center",gap:8,padding:"10px 20px",paddingTop:"35px",flexShrink:0,borderBottom:"1px solid var(--border)",background:"var(--bg)",WebkitAppRegion:"drag"},

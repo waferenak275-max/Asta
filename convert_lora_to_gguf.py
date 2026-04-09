@@ -50,16 +50,13 @@ def convert_lora(input_path, output_path, alpha=None):
             alpha = 32
             print(f"[!] No adapter_config.json found, using default alpha: {alpha}")
 
-    # GGUFWriter with architecture "qwen3" (to match your base model)
     writer = gguf.GGUFWriter(output_path, "qwen3")
     
-    # Critical Metadata for llama.cpp compatibility
     writer.add_string("general.type", "adapter")
     writer.add_string("adapter.type", "lora")
     writer.add_string("general.architecture", "qwen3")
     writer.add_string("general.name", "Asta Qwen3 LoRA")
     
-    # Gunakan float32 untuk alpha (seringkali menyebabkan GGML_ASSERT jika salah tipe)
     writer.add_float32("adapter.lora.alpha", float(alpha))
     
     count = 0
@@ -75,7 +72,7 @@ def convert_lora(input_path, output_path, alpha=None):
     writer.write_kv_data_to_file()
     writer.write_tensors_to_file()
     writer.close()
-    print(f"[V] Success! Converted {count} tensors.")
+    print(f"Converted {count} tensors.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

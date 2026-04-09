@@ -6,19 +6,15 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
-# ─── Config Cache ─────────────────────────────────────────────────────────────
-
+# Config Cache
 _cfg_cache:      dict          = {}
 _cfg_lock:       threading.Lock = threading.Lock()
 _cfg_mtime:      float         = 0.0
 _CONFIG_PATH:    Path          = Path("config.json")
 
-
+# Baca config.json dengan caching berbasis mtime
+# Hanya baca ulang dari disk jika file berubah
 def _get_cfg() -> dict:
-    """
-    Baca config.json dengan caching berbasis mtime.
-    Hanya baca ulang dari disk jika file berubah.
-    """
     global _cfg_cache, _cfg_mtime
     try:
         mtime = _CONFIG_PATH.stat().st_mtime
@@ -34,16 +30,14 @@ def _get_cfg() -> dict:
                 pass
         return dict(_cfg_cache)
 
-
+# Paksa refresh cache pada call berikutnya (dipanggil setelah save_config)
 def invalidate_cfg_cache() -> None:
-    """Paksa refresh cache pada call berikutnya (dipanggil setelah save_config)."""
     global _cfg_mtime
     with _cfg_lock:
         _cfg_mtime = 0.0
 
 
-# ─── Fetcher Dasar ────────────────────────────────────────────────────────────
-
+# Fetcher Dasar
 def _fetch(
     url: str,
     headers: Optional[dict] = None,
@@ -61,9 +55,7 @@ def _fetch(
     except Exception:
         return None
 
-
 # ─── Source 1: Exchange Rate API ──────────────────────────────────────────────
-
 _CURRENCY_PATTERN = re.compile(
     r"\b(kurs|nilai tukar|harga|rate|berapa).{0,30}"
     r"(dolar|dollar|usd|euro|eur|yen|jpy|sgd|pound|gbp|ringgit|myr)\b",
@@ -78,10 +70,8 @@ _CURRENCY_MAP = {
     "ringgit": "MYR", "myr":  "MYR",
 }
 
-
 def _is_currency_query(query: str) -> bool:
     return bool(_CURRENCY_PATTERN.search(query))
-
 
 def _get_exchange_rate(query: str, timeout: int = 5) -> str:
     query_lower = query.lower()
@@ -105,9 +95,7 @@ def _get_exchange_rate(query: str, timeout: int = 5) -> str:
         pass
     return ""
 
-
 # ─── Source 2: Tavily Search API ──────────────────────────────────────────────
-
 def _tavily_search(query: str, timeout: int = 7) -> str:
     api_key = _get_cfg().get("tavily_api_key", "")
     if not api_key:
@@ -142,9 +130,7 @@ def _tavily_search(query: str, timeout: int = 7) -> str:
     except Exception:
         return ""
 
-
 # ─── Source 3: Serper API ─────────────────────────────────────────────────────
-
 def _serper_search(query: str, timeout: int = 5) -> str:
     api_key = _get_cfg().get("serper_api_key", "")
     if not api_key:
@@ -177,9 +163,7 @@ def _serper_search(query: str, timeout: int = 5) -> str:
     except Exception:
         return ""
 
-
 # ─── Source 4: DuckDuckGo Instant Answer ─────────────────────────────────────
-
 def _ddg_instant(query: str, timeout: int = 5) -> str:
     encoded = urllib.parse.quote_plus(query)
     url     = (
@@ -203,9 +187,7 @@ def _ddg_instant(query: str, timeout: int = 5) -> str:
     except Exception:
         return ""
 
-
 # ─── Source 5: Wikipedia API ─────────────────────────────────────────────────
-
 def _wikipedia_search(query: str, timeout: int = 5) -> str:
     import datetime
     if re.search(r"\b(saat ini|sekarang|terkini)\b", query, re.IGNORECASE):
@@ -234,18 +216,12 @@ def _wikipedia_search(query: str, timeout: int = 5) -> str:
             continue
     return ""
 
-
-# ─── Main Search Function ─────────────────────────────────────────────────────
-
+# Main Search Function (Cari satu persatu sampai ada yang berhasil secara urutan)
 def search_and_summarize(
     query: str,
     max_results: int = 3,
     timeout: int = 7,
 ) -> str:
-    """
-    Coba sumber satu per satu sampai ada yang berhasil.
-    Urutan: kurs → tavily → serper → ddg → wikipedia.
-    """
     if _is_currency_query(query):
         result = _get_exchange_rate(query, timeout=timeout)
         if result:

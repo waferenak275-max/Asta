@@ -4,9 +4,7 @@ from typing import Optional
 import re
 import math
 
-
-# ─── Emotion & Mood Constants ─────────────────────────────────────────────────
-
+# Emotion & Mood Constants
 VALID_EMOTIONS = {"netral", "sedih", "cemas", "marah", "senang", "romantis", "rindu", "bangga", "kecewa"}
 
 # Valence: positif = +, negatif = -
@@ -26,11 +24,10 @@ MOOD_DECAY_RATE = 0.12
 USER_TO_ASTA_INFLUENCE = 0.25
 SELF_REINFORCEMENT = 0.35
 
-# ─── Dataclasses ──────────────────────────────────────────────────────────────
-
+# Dataclasses
 @dataclass
 class UserEmotionState:
-    """Emosi yang terdeteksi dari input user."""
+    # Emosi yang terdeteksi dari input user.
     user_emotion: str = "netral"
     intensity: str = "rendah"
     trend: str = "stabil"
@@ -38,31 +35,24 @@ class UserEmotionState:
     last_user_text: str = ""
     updated_at: str = ""
 
-
 @dataclass
 class AstaEmotionState:
     current_emotion: str = "netral"
     current_intensity: str = "rendah"
     mood: str = "netral"
-    mood_score: float = 0.0        # -1.0 (sangat buruk) sampai +1.0 (sangat baik)
-    affection_level: float = 0.7   # 0.0 – 1.0, naik turun berdasarkan interaksi
-    energy_level: float = 0.8      # 0.0 – 1.0, mempengaruhi keaktifan respons
-    trigger: str = ""              # apa yang memicu emosi saat ini
+    mood_score: float = 0.0 
+    affection_level: float = 0.7
+    energy_level: float = 0.8
+    trigger: str = ""
     updated_at: str = ""
-
 
 @dataclass
 class CombinedEmotionState:
     user: UserEmotionState = field(default_factory=UserEmotionState)
     asta: AstaEmotionState = field(default_factory=AstaEmotionState)
 
-
-# ─── User Emotion Manager ─────────────────────────────────────────────────────
-
+# User Emotion Manager
 class UserEmotionDetector:
-    # ─── 1. Pattern Definitions (Weighted) ────────────────────────────────────
-    # Format: "regex_pattern": weight (1=low, 2=medium, 3=high)
-    
     _PATTERNS = {
         "sedih": {
             r"\b(sedih|murung|suram)\b": 2,
@@ -94,11 +84,11 @@ class UserEmotionDetector:
             r"\b(seru|asik|menarik|keren|mantap)\b": 2,
             r"\b(lucu|kocak|ngakak|wkwk|haha|hihi|lol)\b": 2,
             r"\b(semangat|excited|antusias)\b": 2,
-            r"\b(makasih|terima kasih|thanks|thank you)\b": 1, # Makasih = Senang ringan
+            r"\b(makasih|terima kasih|thanks|thank you)\b": 1,
             r"\b(bersyukur|lega|plong)\b": 2,
         },
         "romantis": {
-            r"\b(cinta|love|sayang|kasih sayang)\b": 3, # "kasih" sendirian dihapus
+            r"\b(cinta|love|sayang|kasih sayang)\b": 3,
             r"\b(kangen|rindu|miss)\b": 3,
             r"\b(peluk|cium|kiss|hug)\b": 2,
             r"\b(manja|mesra|gombal)\b": 2,
@@ -112,12 +102,19 @@ class UserEmotionDetector:
         },
         "kecewa": {
             r"\b(kecewa|mengecewakan)\b": 3,
-            r"\b(sayang banget|sayang sekali)\b": 1, # Konteks: "yah sayang banget tiket habis"
+            r"\b(sayang banget|sayang sekali)\b": 1,
             r"\b(gagal|kalah|rugi)\b": 2,
+        },
+        "light_rejection": {
+            r"\b(gak ahh|enggak deh|males ah|kayaknya ngga|kayanya gak|ya ngga deh|nggak deh|gak deh)\b": 2,
+            r"\b(gak mau|enggak mau|jangan dong|jangan deh)\b": 1,
+            r"\b(pass|skip|next|lain kali)\b": 1,
         }
     }
 
     _NEGATIONS = r"\b(tidak|gak|enggak|bukan|jangan|jan|ndak)\s+"
+
+    _LIGHT_REJECTION_PATTERNS = r"\b(gak ahh|enggak deh|males ah|kayaknya ngga|gak mau|pass|skip|next)\b"
 
     _HOSTILE_TARGET_PATTERNS = [
         r"\b(kamu|lu|elo)\s+(bodoh|tolol|goblok|dungu|payah|nyebelin|jelek)\b",
@@ -131,7 +128,6 @@ class UserEmotionDetector:
         text_lower = text.lower().strip()
         scores = {k: 0 for k in self._PATTERNS}
         
-        # 1. Cek Pola Dasar
         for emotion, patterns in self._PATTERNS.items():
             for pattern, weight in patterns.items():
                 matches = list(re.finditer(pattern, text_lower))
@@ -144,22 +140,15 @@ class UserEmotionDetector:
                     
                     scores[emotion] += weight
 
-        # 2. Logika Khusus "Makasih" -> Netral/Senang (Bukan Romantis)
-        # Jika cuma bilang "makasih", jangan biarkan skor romantis naik
         if re.search(r"\b(makasih|terima kasih|thanks)\b", text_lower):
-            # Jika tidak ada kata "sayang/cinta", pastikan romantis 0
             if scores["romantis"] > 0:
                 is_romantic_explicit = re.search(r"\b(cinta|sayang|love|kangen|rindu)\b", text_lower)
                 if not is_romantic_explicit:
                     scores["romantis"] = 0 
 
-        # 3. Logika Tanda Baca
-        # Tanda tanya (?) cenderung Netral atau Cemas (jika ada kata tanya)
         if "?" in text:
             pass 
-        # Tanda seru (!) meningkatkan skor emosi dominan, bukan membuat senang
         if "!" in text:
-            # Cari emosi tertinggi saat ini
             top_emo = max(scores, key=scores.get)
             if scores[top_emo] > 0:
                 scores[top_emo] += 1
@@ -167,7 +156,6 @@ class UserEmotionDetector:
         return scores
 
     def _intensity_from_text(self, text: str, score: int) -> str:
-        # Deteksi Capslock (jika > 50% huruf besar dan panjang > 5)
         caps_ratio = sum(1 for c in text if c.isupper()) / max(1, len(text))
         is_caps = caps_ratio > 0.6 and len(text) > 5
 
@@ -181,7 +169,6 @@ class UserEmotionDetector:
         return "rendah"
 
     def update(self, user_text: str, recent_context: str = "") -> UserEmotionState:
-        # Analisis hanya pada teks terbaru untuk akurasi saat ini
         scores = self._score_emotions(user_text)
 
         # Hostility Check
@@ -193,6 +180,21 @@ class UserEmotionDetector:
             scores["marah"] += 3 * hostility_hits
             scores["kecewa"] += 2 * hostility_hits
 
+        # Light Rejection Detection
+        light_rejection_score = scores.get("light_rejection", 0)
+        if light_rejection_score > 0:
+            # Jika penolakan ringan 
+            negative_emotions = {"sedih", "cemas", "kecewa", "marah"}
+            for neg_emo in negative_emotions:
+                # Jika negative score rendah, turunkan ke 0
+                if scores.get(neg_emo, 0) <= 2:
+                    scores[neg_emo] = 0
+                # Jika negative score sedang tapi light_rejection tinggi, hindari over-react
+                elif scores.get(neg_emo, 0) <= 3 and light_rejection_score >= 2:
+                    scores[neg_emo] = max(0, scores[neg_emo] - 1)
+            # Remove light_rejection dari scoring agar tidak jadi emosi final
+            scores.pop("light_rejection", None)
+
         # Tentukan Pemenang
         detected = "netral"
         top_score = 0
@@ -202,16 +204,13 @@ class UserEmotionDetector:
                 top_score = score
                 detected = emotion
         
-        # Ambang batas minimum: Jika skor terlalu kecil (<1), tetap Netral
-        # Kecuali 'makasih' (skor 1) bisa masuk ke senang/netral
         if top_score < 1:
             detected = "netral"
         elif top_score == 1 and detected == "senang":
-            # "Makasih" (skor 1) seringkali netral sopan
             if len(user_text.split()) < 4: 
-                detected = "netral" # "Makasih ya" -> Netral
+                detected = "netral"
             else:
-                detected = "senang" # "Makasih banget hadiahnya" -> Senang
+                detected = "senang"
 
         # Hitung Tren & Intensitas
         intensity = self._intensity_from_text(user_text, top_score)
@@ -222,7 +221,6 @@ class UserEmotionDetector:
             trend = "stabil"
         else:
             turns = 1
-            # Logika trend sederhana
             bad_emos = {"sedih", "cemas", "marah", "kecewa"}
             if prev in bad_emos and detected not in bad_emos:
                 trend = "membaik"
@@ -241,6 +239,7 @@ class UserEmotionDetector:
         )
         return self.state
 
+    # Thought dapat melakukan Override
     def refine_with_thought(self, thought: dict) -> UserEmotionState:
         llm_emotion = (thought.get("user_emotion") or "").strip().lower()
         llm_conf = (thought.get("emotion_confidence") or "").strip().lower()
@@ -259,8 +258,7 @@ class UserEmotionDetector:
         return self.state
 
 
-# ─── Asta Emotion Manager ─────────────────────────────────────────────────────
-
+# Asta Emotion Manager
 class AstaEmotionManager:
     def __init__(self, initial_state: Optional[AstaEmotionState] = None):
         self.state = initial_state or AstaEmotionState(
@@ -291,29 +289,28 @@ class AstaEmotionManager:
 
         now = datetime.now().isoformat()
 
-        # ── Ambil keputusan emosi Asta dari thought ────────────────────────
+        # Ambil keputusan emosi Asta dari thought
         asta_emotion_from_thought = (thought_result.get("asta_emotion") or "").strip().lower()
         asta_trigger = thought_result.get("asta_trigger", "")
 
-        # ── Decay mood ke arah netral (baseline) ──────────────────────────
+        # Decay mood ke arah netral (baseline)
         current_score = self.state.mood_score
         current_score *= (1.0 - MOOD_DECAY_RATE)
 
-        # ── Pengaruh emosi user ke mood Asta ──────────────────────────────
+        # Pengaruh emosi user ke mood Asta
         user_valence = EMOTION_VALENCE.get(user_emotion.user_emotion, 0.0)
         user_intensity_mult = {"rendah": 0.5, "sedang": 1.0, "tinggi": 1.5}.get(user_emotion.intensity, 1.0)
         user_influence = user_valence * user_intensity_mult * USER_TO_ASTA_INFLUENCE
         current_score += user_influence
 
-        # ── Pengaruh emosi Asta sendiri (self-reinforcement) ───────────────
+        # Pengaruh emosi Asta sendiri (self-reinforcement)
         if asta_emotion_from_thought in VALID_EMOTIONS:
             asta_valence = EMOTION_VALENCE.get(asta_emotion_from_thought, 0.0)
             current_score += asta_valence * SELF_REINFORCEMENT
 
-        # ── Clamp score ke [-1.0, 1.0] ────────────────────────────────────
         current_score = max(-1.0, min(1.0, current_score))
 
-        # ── Tentukan emosi dominan Asta ───────────────────────────────────
+        # Tentukan emosi dominan Asta
         if asta_emotion_from_thought in VALID_EMOTIONS:
             dominant_emotion = asta_emotion_from_thought
         elif current_score >= 0.5:
@@ -327,7 +324,6 @@ class AstaEmotionManager:
         else:
             dominant_emotion = "netral"
 
-        # ── Sinyal hostility user ke Asta (untuk kalibrasi lebih realistis) ─
         hostile_to_asta = bool(re.search(
             r"\b(kamu|asta|lu|elo)\b.{0,12}\b(bodoh|tolol|goblok|dungu|payah|nyebelin|jelek)\b|"
             r"\b(bodoh|tolol|goblok|dungu|payah|nyebelin|jelek)\b.{0,12}\b(kamu|asta|lu|elo)\b|"
@@ -343,7 +339,7 @@ class AstaEmotionManager:
         if (hostile_to_asta or repeated_insult) and user_emotion.user_emotion in {"marah", "kecewa"}:
             current_score -= 0.18 if user_emotion.intensity == "tinggi" else 0.12
 
-        # ── Update affection berdasarkan interaksi romantis/hostile ───────
+        # Update affection berdasarkan interaksi romantis/hostile
         affection = self.state.affection_level
         if user_emotion.user_emotion == "romantis":
             affection = min(1.0, affection + 0.02)
@@ -356,24 +352,22 @@ class AstaEmotionManager:
             if hostile_to_asta or repeated_insult:
                 drop += 0.02
             affection = max(0.1, affection - drop)
-        # Affection sangat perlahan decay
-        affection = affection * 0.999 + 0.7 * 0.001  # selalu menuju 0.7 perlahan
+        affection = affection * 0.999 + 0.7 * 0.001 
 
-        # Override emosi dominan jika ada hostility kuat (hindari tetap "senang")
+        # Override emosi dominan jika ada hostility kuat
         if (hostile_to_asta or repeated_insult) and user_emotion.user_emotion in {"marah", "kecewa"}:
             if user_emotion.intensity == "tinggi" or user_emotion.turns_in_state >= 2:
                 dominant_emotion = "sedih"
             else:
                 dominant_emotion = "kecewa"
 
-        # ── Update energy ─────────────────────────────────────────────────
+        # Update energy 
         energy = self.state.energy_level
         if dominant_emotion in {"senang", "romantis", "bangga"}:
             energy = min(1.0, energy + 0.05)
         elif dominant_emotion in {"sedih", "cemas", "marah"}:
             energy = max(0.2, energy - 0.03)
         else:
-            # Decay ke 0.8 (baseline)
             energy = energy * 0.95 + 0.8 * 0.05
 
         self.state = AstaEmotionState(
@@ -448,18 +442,13 @@ class AstaEmotionManager:
 
         return "\n".join(lines)
 
-
-# ─── Combined Manager (backward-compatible) ───────────────────────────────────
-
+# Combined Manager (backward-compatible)
 class EmotionStateManager:
     def __init__(self, asta_initial: Optional[AstaEmotionState] = None):
         self._user_detector = UserEmotionDetector()
         self._asta_manager  = AstaEmotionManager(asta_initial)
 
-    # ── User emotion (backward-compatible) ───────────────────────────────
-
     def update(self, user_text: str, recent_context: str = "") -> dict:
-        """Update emosi user — mengembalikan dict agar kompatibel dengan kode lama."""
         state = self._user_detector.update(user_text, recent_context)
         return asdict(state)
 
@@ -469,8 +458,6 @@ class EmotionStateManager:
 
     def get_state(self) -> dict:
         return asdict(self._user_detector.get_state())
-
-    # ── Asta emotion ─────────────────────────────────────────────────────
 
     def update_asta_emotion(self, thought_result: dict) -> AstaEmotionState:
         user_state = self._user_detector.get_state()
@@ -488,8 +475,6 @@ class EmotionStateManager:
 
     def get_asta_dict(self) -> dict:
         return self._asta_manager.to_dict()
-
-    # ── Context builder ───────────────────────────────────────────────────
 
     def build_prompt_context(self) -> str:
         return self._asta_manager.build_prompt_context(

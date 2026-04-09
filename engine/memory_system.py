@@ -7,8 +7,7 @@ import datetime
 import torch
 from transformers import AutoTokenizer, AutoModel
 
-# ─── Embedding Model ───────────────────────────────────────────────────────────
-
+# Embedding Model
 HF_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 LOCAL_MODEL_PATH = Path("model") / "embedding_model" / HF_MODEL_NAME.split("/")[-1]
 
@@ -26,14 +25,12 @@ def _load_embedding_model():
 
 _tokenizer, _model = _load_embedding_model()
 
-
 def mean_pooling(model_output, attention_mask):
     token_embeddings = model_output[0]
     mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
     return torch.sum(token_embeddings * mask_expanded, 1) / torch.clamp(
         mask_expanded.sum(1), min=1e-9
     )
-
 
 def create_embedding(text: str) -> np.ndarray:
     if not text or not text.strip():
@@ -45,16 +42,13 @@ def create_embedding(text: str) -> np.ndarray:
     emb = torch.nn.functional.normalize(emb, p=2, dim=1)
     return emb[0].cpu().numpy()
 
-
 def _is_zero_embedding(embedding: list) -> bool:
-    """FIX #2: Cek apakah embedding semua nol — sesi kosong/invalid."""
     if not embedding:
         return True
-    return np.allclose(np.array(embedding[:10]), 0.0)  # cek 10 elemen pertama saja
+    return np.allclose(np.array(embedding[:10]), 0.0)
 
 
-# ─── Key Facts Extractor (Fix #5: Diperketat) ─────────────────────────────────
-
+# Key Facts Extractor
 _FACT_PATTERNS = [
     (r"\baku\s+suka\s+([a-zA-Z ]{4,40})", "preferensi"),
     (r"\baku\s+gak\s+suka\s+([a-zA-Z ]{4,40})", "preferensi_tidak"),
@@ -93,7 +87,6 @@ def extract_key_facts(conversation: list) -> list:
                     return facts
     return facts
 
-
 def facts_to_text(facts: list) -> str:
     if not facts:
         return ""
@@ -105,9 +98,7 @@ def facts_to_text(facts: list) -> str:
         lines.append(f"[{cat}] " + "; ".join(items[:2]))
     return "\n".join(lines)
 
-
 def _build_fallback_summary(conversation: list, key_facts: list, max_chars: int = 240) -> str:
-    """Ringkasan minimal saat llm_summary tidak tersedia."""
     if key_facts:
         raw = "; ".join(f.get("fact", "").strip() for f in key_facts if f.get("fact"))
         raw = re.sub(r"\s+", " ", raw).strip(" ;")
@@ -126,9 +117,7 @@ def _build_fallback_summary(conversation: list, key_facts: list, max_chars: int 
     candidate = re.sub(r"\s+", " ", candidate).strip()
     return candidate[:max_chars]
 
-
-# ─── Base Memory ───────────────────────────────────────────────────────────────
-
+# Base Memory
 class BaseMemory:
     def __init__(self, file_path: Path, default_content):
         self.file_path = file_path
@@ -162,8 +151,7 @@ class BaseMemory:
         return t
 
 
-# ─── Semantic Memory ───────────────────────────────────────────────────────────
-
+# Semantic Memory
 class SemanticMemory(BaseMemory):
     def __init__(self, directory: Path):
         super().__init__(directory / "semantic.json", default_content={})
@@ -245,17 +233,14 @@ class SemanticMemory(BaseMemory):
         scored.sort(key=lambda item: item[0], reverse=True)
         return [entry for _, entry in scored[:top_k]]
 
-
 def _tokenize_topic(text: str) -> list:
     return [w for w in re.split(r"\W+", (text or "").lower()) if len(w) > 2]
-
 
 def _clip_text(text: str, max_chars: int = 160) -> str:
     clean = re.sub(r"\s+", " ", (text or "")).strip()
     if len(clean) <= max_chars:
         return clean
     return clean[: max_chars - 3].rstrip() + "..."
-
 
 def _keyword_overlap_score(text: str, keywords: list, full_query: str = "") -> int:
     hay = (text or "").lower()
@@ -267,15 +252,12 @@ def _keyword_overlap_score(text: str, keywords: list, full_query: str = "") -> i
         score += 3
     return score
 
-
-
-# ─── Episodic Memory ──────────────────────────────────────────────────────────
-
+# Episodic Memory
 class EpisodicMemory(BaseMemory):
     def __init__(self, directory: Path):
         super().__init__(directory / "episodic.json", default_content=[])
 
-    def add(self, conversation: list, llm_summary: str = ""):
+    def add(self, conversation: list, llm_summary: str = "", emotion_context: str = ""):
         text_conv = " ".join(
             f"{m['role']}: {m['content']}"
             for m in conversation
@@ -289,11 +271,15 @@ class EpisodicMemory(BaseMemory):
         key_facts = extract_key_facts(conversation)
         final_summary = (llm_summary or "").strip() or _build_fallback_summary(conversation, key_facts)
 
+        salience = min(1.0, max(0.3, len(key_facts) * 0.1 + len(conversation) * 0.05))
+
         entry = {
             "timestamp": datetime.datetime.now().isoformat(),
             "key_facts": key_facts,
             "llm_summary": final_summary,
             "embedding": embedding,
+            "salience": salience, 
+            "emotional_context": emotion_context or "netral",
             "conversation": [
                 m for m in conversation
                 if m["role"] in ("user", "assistant") and m["content"]
@@ -303,32 +289,35 @@ class EpisodicMemory(BaseMemory):
         if len(self.data) > 50:
             self.data = self.data[-50:]
         self.save_async()
-        print(f"[Episodic] Sesi disimpan. {len(key_facts)} key facts diekstrak.")
+        print(f"[Episodic] Sesi disimpan. {len(key_facts)} facts, salience={salience:.2f}")
 
     def search(self, query: str, top_k: int = 3, threshold: float = 0.10) -> list:
         if not self.data:
             return []
 
         q_emb = create_embedding(query)
-        sims = []
-        valid = []
+        scored = []
 
         for mem in self.data:
             emb = mem.get("embedding", [])
-            if _is_zero_embedding(emb):  # FIX #2
+            if _is_zero_embedding(emb):
                 continue
             sim = float(np.dot(q_emb, np.array(emb)))
-            sims.append(sim)
-            valid.append(mem)
+            
+            salience = mem.get("salience", 0.5) 
+            weighted_sim = sim * (0.7 + salience * 0.3)
+            
+            if weighted_sim > threshold:
+                scored.append((weighted_sim, mem))
 
-        if not sims:
+        if not scored:
             return []
 
-        top_idx = np.argsort(sims)[::-1][:top_k]
-        results = [valid[i] for i in top_idx if sims[i] > threshold]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        results = [mem for _, mem in scored[:top_k]]
 
         if results:
-            print(f"[Episodic] Search '{query[:40]}': {len(results)} hasil")
+            print(f"[Episodic] Search '{query[:40]}': {len(results)} hasil (salience-weighted)")
         return results
 
     def search_by_facts(self, topic: str, top_k: int = 2) -> list:
@@ -423,8 +412,7 @@ class EpisodicMemory(BaseMemory):
         return facts_to_text(all_facts[:max_facts])
 
 
-# ─── Core Memory (Fix #3: Profil Pengguna) ────────────────────────────────────
-
+# Core Memory
 class CoreMemory(BaseMemory):
     def __init__(self, directory: Path):
         super().__init__(
@@ -482,9 +470,7 @@ class CoreMemory(BaseMemory):
 
         return "\n\n".join(parts)
 
-
-# ─── Hybrid Memory ────────────────────────────────────────────────────────────
-
+# Hybrid Memory
 class HybridMemory:
     def __init__(self, episodic: EpisodicMemory, core: CoreMemory, semantic: SemanticMemory = None):
         self.episodic = episodic
@@ -505,15 +491,11 @@ class HybridMemory:
         return _clip_text(text, max_chars) if text else ""
 
     def get_lightweight_hint(self, current_query: str = "") -> str:
-        """Versi ringan untuk model thought agar tidak bloat."""
-
         parts = []
 
-        # 1. Profil (ringkas)
         if summary := self.core.get_summary():
             parts.append(f"[Profil] {summary[:200]}")
 
-        # 2. Fakta terbaru (1 sesi, max 3 fakta)
         if facts := self.episodic.get_recent_facts_text(n_sessions=1, max_facts=3):
             parts.append(f"[Fakta Baru] {facts}")
 
@@ -535,17 +517,20 @@ class HybridMemory:
             re.IGNORECASE,
         ))
 
-        core_text = self.core.get_context_text()
-        if core_text:
-            parts.append(f"[Memori Inti]\n{core_text}")
-
-        facts_text = self.episodic.get_recent_facts_text(n_sessions=3, max_facts=5)
-        if facts_text:
-            parts.append(f"[Fakta Penting]\n{facts_text}")
-
         focus = recall_topic if recall_topic and recall_topic.strip().lower() not in ("", "kosong", "-") else ""
         if not focus and memory_intent:
             focus = current_query
+
+        should_include_memory = include_recall or bool(focus)
+
+        if should_include_memory:
+            core_text = self.core.get_context_text()
+            if core_text:
+                parts.append(f"[Memori Inti]\n{core_text}")
+
+            facts_text = self.episodic.get_recent_facts_text(n_sessions=3, max_facts=5)
+            if facts_text:
+                parts.append(f"[Fakta Penting]\n{facts_text}")
 
         # RECALL: hanya aktif jika dipicu (include_recall)
         if include_recall:

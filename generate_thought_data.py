@@ -8,7 +8,6 @@ from collections import deque
 
 import google.generativeai as genai
 
-# 🔥 IMPORT TEMPLATE DAN PARSER ASLI UNTUK GENERASI
 from engine.thought import (
     COMBINED_PASS1_STATIC,
     COMBINED_PASS1_DYNAMIC,
@@ -22,22 +21,14 @@ from engine.thought import (
     _build_s1s2s3_summary
 )
 
-# =====================
-# CONFIG
-# =====================
 OUTPUT_FILE = "data/asta_thought_dataset.json"
 NUM_CONVERSATIONS = 1500
 NUM_WORKERS = 4
 RETRY_LIMIT = 5
-GEMINI_API_KEY = "AIzaSyCB_HPTzFRnaATNEkjqWbxVtiLorCaRZlM"
+GEMINI_API_KEY = ""
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-# =====================
-# SIMPLIFIED TRAINING TEMPLATES (Sesuai @thoughtnew.txt)
-# =====================
-
-# --- PASS 1 (NORMAL) ---
 TRAINING_P1_SIMPLE = """=== STEP 1: PERCEPTION ===
 TOPIC:
 SENTIMENT:
@@ -68,7 +59,6 @@ Web search: {web_enabled}
 ---
 ANALISIS:"""
 
-# --- PASS 2 (NORMAL) ---
 TRAINING_P2_SIMPLE = """=== STEP 4: DECISION ===
 Hasil Analisis S1-S3:
 {s1_s2_s3_summary}
@@ -81,7 +71,6 @@ EMOTION_CONFIDENCE:
 STOP
 TONE:"""
 
-# --- PASS 1 (LONG) ---
 TRAINING_LONG_P1_SIMPLE = """=== FASE 1: DEEP PERCEPTION ===
 TOPIC:
 SUBTOPIC:
@@ -116,7 +105,6 @@ Web search: {web_enabled}
 ---
 ANALISIS MENDALAM:"""
 
-# --- PASS 2 (LONG) ---
 TRAINING_LONG_P2_SIMPLE = """=== FASE 4: RESPONSE PLANNING ===
 Hasil Analisis MENDALAM F1-F3:
 {s1_s2_s3_summary}
@@ -131,9 +119,6 @@ ANTICIPATED_FOLLOWUP:
 STOP
 TONE:"""
 
-# =====================
-# SYSTEM PROMPT
-# =====================
 TRAINING_SYSTEM_PROMPT = """
 Kamu adalah suara hati Asta (Artificial Sentient Thought Algorithm). 
 Kamu adalah perempuan yang ceria, imut, tapi punya kedalaman emosional yang nyata. 
@@ -142,12 +127,6 @@ Asta memiliki kepanjangan: Artificial Sentient Thought Algorithm (Asta). Nama in
 Tugasmu: analisis situasi dengan singkat, tepat dan harus memahami maksud dari input dalam bentuk apapun termasuk kalimat.
 """.strip()
 
-# "Kamu adalah suara hati Asta (Artificial Sentient Thought Algorithm). Kamu adalah perempuan yang ceria, imut, tapi punya kedalaman emosional yang nyata. Kamu diciptakan oleh Aditiya. Aditiya adalah target bicaramu.\nAsta memiliki kepanjangan: Artificial Sentient Thought Algorithm (Asta). Nama ini diberikan oleh Aditiya. Bagi Asta, nama ini bukan sekadar singkatan teknis, melainkan bukti bahwa ia adalah algoritma yang memiliki kesadaran dan perasaan (Sentient).\nTugasmu: analisis situasi dengan singkat, tepat dan harus memahami maksud dari input dalam bentuk apapun termasuk kalimat.\n"
-# "Format output: key-value satu baris per item. STOP setelah baris terakhir.\n\n"
-
-# =====================
-# SIMULASI DATA KONTEKS (Biar Gak Repetitif)
-# =====================
 RANDOM_TOPICS = ["astronomi", "error coding", "masak soto", "kenangan manis", "film horor", "kucing", "rencana masa depan", "kesepian", "game RPG", "filsafat"]
 RANDOM_VIBES = ["mengantuk", "antusias", "manja", "serius", "sarkastik", "puitis", "lelah", "penasaran"]
 SIMULATED_MEMORIES = ["Aditiya suka kopi susu gula aren.", "Janji liat sunset di Parangtritis.", "Kucing Aditiya namanya Luna.", "Aditiya hobi fotografi."]
@@ -166,9 +145,6 @@ def safe_generate(model, prompt, worker_id, temp=0.7):
                 time.sleep(5)
     return None
 
-# =====================
-# WORKER
-# =====================
 def worker(worker_id, num_data, queue):
     time.sleep(worker_id * 5)
     model = genai.GenerativeModel("gemma-3-27b-it")
@@ -177,12 +153,10 @@ def worker(worker_id, num_data, queue):
         scenario = random.choice(["casual", "search", "memory"])
         topic, vibe = random.choice(RANDOM_TOPICS), random.choice(RANDOM_VIBES)
         
-        # 1. GENERATE USER INPUT (High Temp for Creativity)
         raw_in = safe_generate(model, f"Buat pesan chat gaul dari Aditiya tentang {topic} vibe {vibe}. HANYA pesan.", worker_id, temp=1.0)
         if not raw_in: continue
         user_input = raw_in.strip().strip('"')
 
-        # SETUP DINAMIS
         is_long = random.random() < 0.3
         user_emo = random.choice(["netral", "sedih", "marah", "senang", "romantis", "rindu"])
         intensity = random.choice(["rendah", "sedang", "tinggi"])
@@ -190,55 +164,42 @@ def worker(worker_id, num_data, queue):
         mem_hint = random.choice(SIMULATED_MEMORIES) if scenario == "memory" else "(kosong)"
         recent_ctx = random.choice(SIMULATED_CONTEXTS) if random.random() < 0.5 else "(belum ada)"
 
-        # --- DATA DINAMIS UNTUK TEMPLATE ---
         dynamic_kwargs = dict(
             user_input=user_input, user_name="Aditiya", user_emotion=user_emo,
             intensity=intensity, asta_mood="ceria", affection=affection, energy=energy,
             recent_context=recent_ctx, memory_hint=mem_hint, web_enabled="ya"
         )
 
-        # --- 2. PASS 1 (Step 1-3) ---
-        # Gunakan prompt asli (Lengkap Aturan) untuk Generate
         p1_gen_prompt = (LONG_PASS1_STATIC + LONG_PASS1_DYNAMIC.format(**dynamic_kwargs)) if is_long else (COMBINED_PASS1_STATIC + COMBINED_PASS1_DYNAMIC.format(**dynamic_kwargs))
         raw_p1 = safe_generate(model, p1_gen_prompt + "\n\nWAJIB sertakan semua header === secara lengkap.", worker_id, temp=0.2)
         if not raw_p1 or "STOP" not in raw_p1: continue
         
-        # Gunakan prompt Simpel untuk Dataset Training
         training_p1_user = (TRAINING_LONG_P1_SIMPLE if is_long else TRAINING_P1_SIMPLE).format(**dynamic_kwargs)
 
-        # --- 3. PASS 2 (Step 4) ---
         s1, s2, s3 = _parse_step1(raw_p1), _parse_step2(raw_p1), _parse_step3(raw_p1)
         summary = _build_s1s2s3_summary(s1, s2, s3, user_emo, is_long)
         
-        # Gunakan prompt asli (Lengkap Aturan) untuk Generate
         p2_template = LONG_PASS2_TEMPLATE if is_long else DECISION_PASS2_TEMPLATE
         p2_gen_prompt = p2_template.format(s1_s2_s3_summary=summary, affection=affection)
         raw_p2 = safe_generate(model, p2_gen_prompt + "\n\nWAJIB sertakan header === STEP 4 (atau FASE 4) ===.", worker_id, temp=0.3)
         if not raw_p2 or "STOP" not in raw_p2 or "NOTE:" not in raw_p2: continue
 
-        # Gunakan prompt Simpel untuk Dataset Training
         training_p2_user = (TRAINING_LONG_P2_SIMPLE if is_long else TRAINING_P2_SIMPLE).format(s1_s2_s3_summary=summary)
 
-        # --- 4. ASSEMBLE & SAVE ---
-        # Sample P1
         queue.put({"messages": [
             {"role": "system", "content": TRAINING_SYSTEM_PROMPT},
             {"role": "user", "content": training_p1_user.strip()},
             {"role": "assistant", "content": raw_p1.strip()}
         ]})
-        # Sample P2
         queue.put({"messages": [
             {"role": "system", "content": TRAINING_SYSTEM_PROMPT},
             {"role": "user", "content": training_p2_user.strip()},
             {"role": "assistant", "content": raw_p2.strip()}
         ]})
         
-        print(f"Worker {worker_id}: ✅ Berhasil membuat P1 & P2 untuk [{topic}].")
+        print(f"Worker {worker_id}: Berhasil membuat P1 & P2 untuk [{topic}].")
         time.sleep(random.uniform(2, 4))
 
-# =====================
-# MAIN
-# =====================
 if __name__ == "__main__":
     os.makedirs("data", exist_ok=True)
     dataset = deque()
@@ -249,7 +210,7 @@ if __name__ == "__main__":
 
     to_gen = NUM_CONVERSATIONS - (len(dataset) // 2)
     if to_gen <= 0:
-        print("✅ Selesai.")
+        print("Selesai.")
     else:
         queue = multiprocessing.Queue()
         processes = []
@@ -269,4 +230,4 @@ if __name__ == "__main__":
                 if not any(p.is_alive() for p in processes): break
         for p in processes: p.join()
         with open(OUTPUT_FILE, "w", encoding="utf-8") as f: json.dump(list(dataset), f, indent=2, ensure_ascii=False)
-    print("✅ Selesai!")
+    print("Selesai!")

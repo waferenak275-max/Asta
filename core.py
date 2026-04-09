@@ -21,7 +21,6 @@ cfg = load_config()
 if args.setup or not Path("config.json").exists():
     cfg = setup_wizard(cfg)
 
-
 def get_or_set_user_name() -> str:
     current = get_identity("nama_user")
     if current:
@@ -85,7 +84,6 @@ if args.debug:
     print("  [DEBUG MODE] Internal thought ditampilkan.")
 print("=" * 50 + "\n")
 
-
 while True:
     sys.stdout.write("Kamu: ")
     sys.stdout.flush()
@@ -114,7 +112,7 @@ while True:
             if t:
                 t.join(timeout=8)
 
-        print(f"\nDaa {user_name}! Asta tunggu kamu balik ya~ 💕\n")
+        print(f"\nDaa {user_name}! Asta tunggu kamu balik ya~\n")
         break
 
     if user_input.lower() == "!memory":
@@ -152,7 +150,6 @@ while True:
         continue
 
     try:
-        # chat() sekarang handle streaming sendiri via CLI mode (tanpa callback)
         chat_manager.chat(user_input)
     except Exception as e:
         print(f"[Error] {e}\n")

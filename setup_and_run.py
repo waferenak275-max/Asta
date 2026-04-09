@@ -1,7 +1,3 @@
-"""
-setup_and_run.py - Asta AI Launcher
-Mengikuti persis urutan manual yang sudah terbukti berjalan.
-"""
 import sys
 import subprocess
 import shutil
@@ -10,9 +6,8 @@ import webbrowser
 from pathlib import Path
 
 ROOT   = Path(__file__).parent.resolve()
-UI_DIR = ROOT / "ui/asta-ui"  # nama folder dari: npm create vite@latest asta-ui
+UI_DIR = ROOT / "ui/asta-ui"
 
-# ── Cari venv ─────────────────────────────────────────────────────────────────
 def find_venv():
     for name in ("venv", ".venv", "env"):
         p = ROOT / name / "Scripts" / "python.exe"
@@ -35,19 +30,13 @@ def venv_uvicorn():
             return str(uv)
     return "uvicorn"
 
-# ─────────────────────────────────────────────────────────────────────────────
 def header():
-    print()
-    print("  ==========================================")
-    print("       ASTA AI -- Launcher")
-    print("  ==========================================")
     venv_label = str(VENV) if VENV else "tidak ditemukan"
     print(f"  venv   : {venv_label}")
     print(f"  ui dir : {UI_DIR}")
     print()
 
 def check_ui():
-    """Pastikan folder asta-ui dan node_modules ada."""
     if not UI_DIR.exists():
         print(f"  [ERROR] Folder '{UI_DIR.name}' tidak ditemukan di {ROOT}")
         print()
@@ -64,7 +53,6 @@ def check_ui():
         input("  Tekan Enter untuk keluar...")
         sys.exit(1)
 
-    # Sync file UI terbaru
     src = UI_DIR / "src"
     src.mkdir(exist_ok=True)
 
@@ -76,7 +64,6 @@ def check_ui():
 
     shutil.copy2(asta_src, src / "AstaUI.jsx")
 
-    # App.jsx — persis seperti yang kamu tulis manual, tanpa import React
     (src / "App.jsx").write_text(
         "import AstaUI from './AstaUI'\n"
         "export default function App() { return <AstaUI /> }\n",
@@ -88,7 +75,6 @@ def check_ui():
 def launch():
     uvicorn = venv_uvicorn()
 
-    # Tulis bat backend — pakai uvicorn dari venv langsung
     backend_bat = ROOT / "_backend.bat"
     if VENV:
         activate = VENV / "Scripts" / "activate.bat"

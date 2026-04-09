@@ -3,7 +3,6 @@ import os
 import sys
 from pathlib import Path
 
-# Mocking parts of the system to isolate performance bottlenecks
 sys.path.append(str(Path("C:/Users/USER/Documents/Asta")))
 
 from config import load_config
@@ -40,19 +39,15 @@ def test_performance():
     import llama_cpp
     from llama_cpp.llama_tokenizer import LlamaHFTokenizer
     
-    # We need a minimal llama instance for tokenizing
     choice = cfg.get("model_choice", "1")
     model_cfg = MODELS[choice]
     tokenizer = LlamaHFTokenizer.from_pretrained(model_cfg["tokenizer_path"])
     
-    # Minimal mock or actual llama for token counting
-    # To save time, we might just use the tokenizer if possible, 
-    # but ChatManager uses llama.tokenize
     print("Loading minimal llama for tokenizer...")
     llama = llama_cpp.Llama(
         model_path=model_cfg["model_path"],
         tokenizer=tokenizer,
-        vocab_only=True, # FAST LOAD
+        vocab_only=True,
         verbose=False
     )
     

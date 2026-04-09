@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
-
 @dataclass
 class TokenBudget:
     total_ctx:        int = 8192
@@ -13,7 +12,12 @@ class TokenBudget:
     def available_total(self) -> int:
         return self.total_ctx - self.response_reserved
 
-
+# Susun messages yang akan dikirim ke model dengan batasan token.
+# Urutan prioritas (dari tertinggi):
+# 1. system_identity selalu masuk
+# 2. dynamic_context selalu masuk (berisi memori, emosi, catatan thought)
+# 3. conversation_history dipotong dari yang paling lama jika budget habis
+# Returns: (final_messages, total_token_count)
 class TokenBudgetManager:
     def __init__(self, budget: TokenBudget, count_fn: Callable[[List[Dict]], int]):
         self.budget   = budget
@@ -25,17 +29,7 @@ class TokenBudgetManager:
         conversation_history: List[Dict],
         dynamic_context:      Optional[Dict] = None,
     ) -> tuple:
-        """
-        Susun messages yang akan dikirim ke model dengan batasan token.
-
-        Urutan prioritas (dari tertinggi):
-          1. system_identity  — selalu masuk
-          2. dynamic_context  — selalu masuk (berisi memori, emosi, catatan thought)
-          3. conversation_history — dipotong dari yang paling lama jika budget habis
-
-        Returns:
-            (final_messages, total_token_count)
-        """
+        
         # Hitung slot yang sudah terpakai
         used = self.count_fn([system_identity])
         if dynamic_context:
@@ -43,7 +37,7 @@ class TokenBudgetManager:
 
         conv_budget = self.budget.available_total - used
 
-        # Pilih history dari belakang (terbaru) selama masih muat
+        # Pilih history dari belakang (terbaru)
         clean_history = [
             m for m in conversation_history
             if m.get("role") in ("user", "assistant") and m.get("content")
@@ -56,18 +50,15 @@ class TokenBudgetManager:
                 selected.insert(0, msg)
                 conv_budget -= cost
             else:
-                break  # budget habis, hentikan (tidak skip)
+                break 
 
-        final = [system_identity] + selected
+        final = [system_identity]
         if dynamic_context:
             final.append(dynamic_context)
+        final.extend(selected)
 
         total_tokens = self.count_fn(final)
         return final, total_tokens
 
     def estimate_memory_chars(self) -> int:
-        """
-        Estimasi kasar berapa karakter memory yang aman dimasukkan
-        berdasarkan memory_budget token. Asumsi: ~3 karakter per token.
-        """
         return self.budget.memory_budget * 3

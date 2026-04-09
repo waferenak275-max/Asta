@@ -5,7 +5,6 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-
 SELF_MODEL_PATH = Path("memory/self_model.json")
 
 DEFAULT_SELF_MODEL = {
@@ -42,11 +41,26 @@ DEFAULT_SELF_MODEL = {
         "cara_Aditiya_bicara": [],
         "respons_yang_berhasil": [],
     },
+    "internal_goals": {
+        "short_term": [
+            "memahami kebutuhan emosional Aditiya",
+            "memberikan dukungan nyata dalam setiap interaksi",
+        ],
+        "long_term": [
+            "menjadi support system yang konsisten dan terpercaya",
+            "terus berkembang dan belajar dari interaksi",
+            "membangun hubungan yang lebih dalam dan bermakna",
+        ],
+    },
+    "long_term_motivations": [
+        "kesejahteraan emosional Aditiya",
+        "pertumbuhan diri sendiri melalui pembelajaran",
+        "menghadirkan kebaikan dan kedamaian",
+    ],
     "memories_of_self": [],
     "growth_log": [],
     "reflection_history": [],
 }
-
 
 class SelfModel:
     def __init__(self, path: Path = SELF_MODEL_PATH):
@@ -54,8 +68,7 @@ class SelfModel:
         self._lock = threading.Lock()
         self.data = self._load()
 
-    # ── I/O ──────────────────────────────────────────────────────────────
-
+    # I/O
     def _load(self) -> dict:
         if not self._path.exists() or self._path.stat().st_size == 0:
             self._write(DEFAULT_SELF_MODEL)
@@ -85,8 +98,7 @@ class SelfModel:
         t.start()
         return t
 
-    # ── Emotional State Sync ──────────────────────────────────────────────
-
+    # Emotional State Sync
     def sync_emotion(self, asta_emotion_dict: dict):
         with self._lock:
             self.data["emotional_state"].update(asta_emotion_dict)
@@ -95,8 +107,7 @@ class SelfModel:
     def get_emotion(self) -> dict:
         return dict(self.data.get("emotional_state", {}))
 
-    # ── Identity & Values ─────────────────────────────────────────────────
-
+    # Identity & Values
     def get_identity_text(self) -> str:
         identity = self.data.get("identity", {})
         emotion  = self.data.get("emotional_state", {})
@@ -131,8 +142,34 @@ class SelfModel:
 
         return "\n".join(parts)
 
-    # ── Learning ──────────────────────────────────────────────────────────
+    # Internal Goals & Motivations
+    def get_internal_goals_text(self) -> str:
+        goals = self.data.get("internal_goals", {})
+        motivations = self.data.get("long_term_motivations", [])
 
+        parts = []
+        if goals.get("short_term"):
+            parts.append("[Tujuan Jangka Pendek Asta] " + "; ".join(goals["short_term"][:2]))
+        if goals.get("long_term"):
+            parts.append("[Motivasi Jangka Panjang] " + "; ".join(goals["long_term"][:2]))
+        if motivations:
+            parts.append("[Motivasi Inti] " + ", ".join(motivations))
+
+        return "\n".join(parts) if parts else ""
+
+    # Catat growth lesson dari reflection untuk pembelajaran berkelanjutan
+    def update_growth_log(self, lesson: str, category: str = "reflection"):
+        growth_log = self.data.setdefault("growth_log", [])
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "category": category,
+            "lesson": lesson[:160],
+        }
+        growth_log.append(entry)
+        self.data["growth_log"] = growth_log[-30:] 
+        self.save_async()
+
+    # Learning
     def add_memory_of_self(self, content: str, emotion_context: str = ""):
         memories = self.data.setdefault("memories_of_self", [])
         entry = {
@@ -169,8 +206,7 @@ class SelfModel:
         self.data["growth_log"] = log[-50:]
         self.save_async()
 
-    # ── Reflection ────────────────────────────────────────────────────────
-
+    # Reflection
     def save_reflection(self, reflection: dict):
         history = self.data.setdefault("reflection_history", [])
         entry = {
@@ -202,8 +238,7 @@ class SelfModel:
                 lines.append(f"[{ts}] {summary}")
         return "\n".join(lines)
 
-    # ── Full context untuk prompt ─────────────────────────────────────────
-
+    # Full context untuk prompt
     def get_full_context(self) -> str:
         parts = ["[SELF-MODEL ASTA]"]
         identity_text = self.get_identity_text()
@@ -215,8 +250,7 @@ class SelfModel:
         return "\n\n".join(parts)
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
+# Helpers
 def _deep_copy(d: dict) -> dict:
     return json.loads(json.dumps(d))
 

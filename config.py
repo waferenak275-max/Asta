@@ -14,15 +14,15 @@ DEFAULT_CONFIG = {
     "tavily_api_key":           "",
     "serper_api_key":           "",
     "internal_thought_enabled": True,
-    "combined_thought_enabled": True,   # selalu True, legacy flag (tidak dihapus agar kompatibel)
-    "long_thinking_enabled":    False,  # fitur baru: deep analysis untuk input kompleks
-    "long_thinking_max_tokens": 1536,   # token budget untuk long thinking pass
+    "combined_thought_enabled": True,
+    "long_thinking_enabled":    False,
+    "long_thinking_max_tokens": 1536,
     "use_dynamic_prompt":       True,
     "thought_n_ctx":            3072,
     "thought_max_tokens":       1024,
     "thought_reset_every":      10,
-    "disable_step3_rule_based": True,
-    "separate_thought_model":   False,
+    "use_model_thought_logic":  True,
+    "separate_thought_model":   True,
     "token_budget": {
         "total_ctx":         8192,
         "response_reserved": 512,
@@ -31,7 +31,6 @@ DEFAULT_CONFIG = {
     },
 }
 
-
 def load_config() -> dict:
     if not CONFIG_PATH.exists():
         save_config(DEFAULT_CONFIG)
@@ -39,10 +38,8 @@ def load_config() -> dict:
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Merge: default sebagai base agar key baru selalu ada
         merged = DEFAULT_CONFIG.copy()
         merged.update(data)
-        # Pastikan sub-dict token_budget juga di-merge
         if isinstance(data.get("token_budget"), dict):
             merged["token_budget"] = {**DEFAULT_CONFIG["token_budget"], **data["token_budget"]}
         return merged
@@ -50,17 +47,14 @@ def load_config() -> dict:
         save_config(DEFAULT_CONFIG)
         return DEFAULT_CONFIG.copy()
 
-
 def save_config(cfg: dict) -> None:
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
-    # Invalidate web_tools config cache agar perubahan langsung terpakai
     try:
         from engine.web_tools import invalidate_cfg_cache
         invalidate_cfg_cache()
     except ImportError:
         pass
-
 
 def setup_wizard(cfg: dict) -> dict:
     print("\n" + "=" * 50)
@@ -115,6 +109,6 @@ def setup_wizard(cfg: dict) -> dict:
                 cfg["thought_n_ctx"] = 3072
 
     save_config(cfg)
-    print("\n✓ Konfigurasi disimpan ke config.json")
-    print("  Untuk reset: python core.py --setup\n")
+    print("\nKonfigurasi disimpan ke config.json")
+    print("Untuk reset: python core.py --setup\n")
     return cfg

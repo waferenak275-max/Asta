@@ -19,20 +19,16 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-# ─── State Global ─────────────────────────────────────────────────────────────
-
+# State Global
 _chat_manager  = None
 _hybrid_memory = None
 _init_lock     = threading.Lock()
 _initialized   = False
-# Satu lock untuk mencegah dua request chat berjalan bersamaan pada ChatManager yang sama
 _chat_lock     = asyncio.Lock()
 
 
-# ─── Inisialisasi ─────────────────────────────────────────────────────────────
-
+# Inisialisasi
 def _initialize_sync() -> None:
-    """Jalankan di executor agar tidak block event loop."""
     global _chat_manager, _hybrid_memory, _initialized
 
     if _initialized:
@@ -58,9 +54,8 @@ def _initialize_sync() -> None:
         _hybrid_memory = hybrid_mem
         _initialized   = True
 
-
+# Simpan sesi ke episodic memory
 def _save_session_sync() -> int:
-    """Simpan sesi ke episodic memory. Aman dipanggil dari thread manapun."""
     if not _initialized or not _chat_manager:
         return 0
     from engine.memory import add_episodic
@@ -76,22 +71,16 @@ def _save_session_sync() -> int:
             )
     return len(conv)
 
-
-# ─── Lifespan (menggantikan @on_event yang deprecated) ────────────────────────
-
+# Lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: load model di thread pool agar event loop tidak block
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, _initialize_sync)
     yield
-    # Shutdown: simpan sesi terakhir
     if _initialized:
         await loop.run_in_executor(None, _save_session_sync)
 
-
-# ─── App ──────────────────────────────────────────────────────────────────────
-
+# App
 app = FastAPI(title="Asta AI API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
@@ -101,16 +90,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Guard decorator ──────────────────────────────────────────────────────────
-
+# Guard decorator
 def _require_initialized():
     if not _initialized:
         return JSONResponse({"error": "Model belum siap."}, status_code=503)
     return None
 
-
-# ─── REST Endpoints ───────────────────────────────────────────────────────────
-
+# REST Endpoints
 @app.get("/status")
 async def status():
     if not _initialized:
@@ -132,7 +118,6 @@ async def status():
         "response_model":    "8B" if _chat_manager.cfg.get("model_choice", "2") == "2" else "3B",
         "long_thinking":     _chat_manager.cfg.get("long_thinking_enabled", False),
     }
-
 
 @app.get("/memory")
 async def get_memory():
@@ -158,7 +143,6 @@ async def get_memory():
         "sessions":     previews,
     }
 
-
 @app.get("/self")
 async def get_self_model():
     err = _require_initialized()
@@ -178,14 +162,12 @@ async def get_self_model():
         "reflection_count":  len(refs),
     }
 
-
 @app.get("/emotion")
 async def get_emotion():
     err = _require_initialized()
     if err:
         return err
     return _chat_manager.emotion_manager.get_combined()
-
 
 @app.get("/config")
 async def get_config():
@@ -204,7 +186,6 @@ async def get_config():
         "response_model":           "8B" if _chat_manager.cfg.get("model_choice", "2") == "2" else "3B",
     }
 
-
 @app.post("/config/thought")
 async def toggle_thought():
     err = _require_initialized()
@@ -216,10 +197,8 @@ async def toggle_thought():
     save_config(_chat_manager.cfg)
     return {"internal_thought_enabled": _chat_manager.cfg["internal_thought_enabled"]}
 
-
 @app.post("/config/long_thinking")
 async def toggle_long_thinking():
-    """Toggle fitur long thinking on/off."""
     err = _require_initialized()
     if err:
         return err
@@ -228,7 +207,6 @@ async def toggle_long_thinking():
         not _chat_manager.cfg.get("long_thinking_enabled", False)
     save_config(_chat_manager.cfg)
     return {"long_thinking_enabled": _chat_manager.cfg["long_thinking_enabled"]}
-
 
 @app.post("/config/separate_thought")
 async def toggle_separate_thought():
@@ -240,7 +218,6 @@ async def toggle_separate_thought():
         not _chat_manager.cfg.get("separate_thought_model", True)
     save_config(_chat_manager.cfg)
     return {"separate_thought_model": _chat_manager.cfg["separate_thought_model"]}
-
 
 @app.post("/config/device")
 async def toggle_device():
@@ -258,7 +235,6 @@ async def toggle_device():
     invalidate_cfg_cache()
     return {"device": new_device}
 
-
 @app.post("/save")
 async def save_session():
     err = _require_initialized()
@@ -267,7 +243,6 @@ async def save_session():
     loop    = asyncio.get_event_loop()
     saved_n = await loop.run_in_executor(None, _save_session_sync)
     return {"saved": saved_n}
-
 
 @app.post("/reflect")
 async def trigger_reflection():
@@ -279,14 +254,9 @@ async def trigger_reflection():
     return {"status": "done"}
 
 
-# ─── WebSocket: Terminal ──────────────────────────────────────────────────────
-
+# WebSocket: Terminal
 @app.websocket("/ws/terminal")
 async def terminal_socket(websocket: WebSocket):
-    """
-    Terminal WebSocket untuk keperluan lokal/development.
-    PERINGATAN: Tidak ada autentikasi — jangan expose ke publik.
-    """
     await websocket.accept()
     import os
     import subprocess
@@ -341,9 +311,7 @@ async def terminal_socket(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
 
-
-# ─── WebSocket: Chat ──────────────────────────────────────────────────────────
-
+# WebSocket: Chat
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     await websocket.accept()
@@ -351,7 +319,6 @@ async def websocket_chat(websocket: WebSocket):
 
     try:
         while True:
-            # Terima pesan dari client
             try:
                 raw        = await websocket.receive_text()
                 data       = json.loads(raw)
@@ -370,22 +337,15 @@ async def websocket_chat(websocket: WebSocket):
 
             await websocket.send_text(json.dumps({"type": "thinking_start"}))
 
-            # Queue untuk komunikasi antara thread dan async loop
             chunk_queue: asyncio.Queue = asyncio.Queue()
 
             async def _process_and_stream():
-                """
-                Satu fungsi yang menangani seluruh pipeline:
-                thought → notify → generate → stream chunks.
-                Semua exception tertangkap dan dikirim ke queue.
-                """
                 try:
-                    # Gunakan lock agar tidak ada dua request berjalan bersamaan
                     async with _chat_lock:
                         thought_data: dict = {}
 
+                        # Dipanggil oleh chat() setelah thought selesai
                         def thinking_callback(thought: dict) -> None:
-                            """Dipanggil oleh chat() setelah thought selesai."""
                             thought_data.update(thought)
                             is_dual = _chat_manager.llama_thought is not _chat_manager.llama
                             payload = {
@@ -430,7 +390,6 @@ async def websocket_chat(websocket: WebSocket):
                             )
 
                         def stream_callback(text: str) -> None:
-                            """Dipanggil oleh chat() tiap token."""
                             loop.call_soon_threadsafe(
                                 chunk_queue.put_nowait,
                                 {"type": "chunk", "text": text},
@@ -467,7 +426,7 @@ async def websocket_chat(websocket: WebSocket):
             try:
                 while True:
                     try:
-                        # Timeout guard: jika tidak ada item dalam 120 detik, anggap hang
+                        # Timeout guard: jika tidak ada hasil dalam 120 detik, anggap hang
                         item = await asyncio.wait_for(chunk_queue.get(), timeout=120.0)
                     except asyncio.TimeoutError:
                         await websocket.send_text(

@@ -3,17 +3,16 @@ import os
 import re
 
 INPUT_FILE = "data/asta_thought_training_qwen.json"
-OUTPUT_FILE = "data/asta_thought_training_qwen.json" # Langsung timpa file asli
-
+OUTPUT_FILE = "data/asta_thought_training_qwen.json"
 def repair_headers():
     if not os.path.exists(INPUT_FILE):
-        print(f"❌ File {INPUT_FILE} tidak ditemukan!")
+        print(f"File {INPUT_FILE} tidak ditemukan!")
         return
 
     with open(INPUT_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    print(f"🛠️ Memulai perbaikan pada {len(data)} sampel...")
+    print(f"Memulai perbaikan pada {len(data)} sampel...")
     repaired_count = 0
 
     for i, item in enumerate(data):
@@ -53,17 +52,15 @@ def repair_headers():
                 h = "=== FASE 4: RESPONSE PLANNING ===" if is_long else "=== STEP 4: DECISION ==="
                 assistant_content = h + "\n" + assistant_content
 
-        # Jika ada perubahan, rakit kembali string text-nya
         if assistant_content != original_content:
             new_text = f"{header_user_part}<|im_start|>assistant\n{assistant_content}\n<|im_end|>{footer_part}"
             item["text"] = new_text
             repaired_count += 1
 
-    # Simpan hasil perbaikan
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-    print(f"✅ Selesai! Berhasil memperbaiki {repaired_count} sampel.")
+    print(f"Berhasil memperbaiki {repaired_count} sampel.")
 
 if __name__ == "__main__":
     repair_headers()

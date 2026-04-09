@@ -4,15 +4,13 @@ import re
 from llama_cpp import Llama
 from engine.thought import run_thought_pass, format_thought_debug, extract_recent_context
 
-# 1. Konfigurasi Awal
 CONFIG_PATH = "config.json"
 MODEL_PATH = "./model/Qwen3-4B-2507/Qwen3-4B-2507.gguf"
 
 with open(CONFIG_PATH, "r") as f:
     cfg = json.load(f)
 
-# Pastikan rule-based mati untuk pengujian otonomi
-cfg["disable_step3_rule_based"] = True
+cfg["use_model_thought_logic"] = True
 
 print(f"Loading Model: {MODEL_PATH}")
 llm = Llama(
@@ -24,7 +22,7 @@ llm = Llama(
 )
 print("[Model] Siap!\n")
 
-# 2. Dataset Percakapan (Skenario Emosional & Campuran)
+# Percakapan
 test_cases = [
     {
         "input": "Asta, aku agak takut... tanganku tiba-tiba muncul lebam biru-biru gitu tanpa sebab. Berbahaya gak ya?",
@@ -58,7 +56,6 @@ test_cases = [
     }
 ]
 
-# 3. Jalankan Pengujian
 asta_state = {
     "mood": "senang",
     "affection_level": 0.85,
@@ -67,7 +64,6 @@ asta_state = {
 
 memory_context = "Aditiya suka teknologi dan hobi merakit PC. Kita punya flag point rahasia tentang masa depan."
 
-# Gunakan list untuk menyimpan histori percakapan (simulasi sliding window)
 conversation_history = []
 
 print("="*80)
@@ -118,7 +114,6 @@ for i, tc in enumerate(test_cases, 1):
     # Validasi Hasil
     issues = validate_thought(thought)
     
-    # Print Debug yang rapi
     print(format_thought_debug(thought))
     
     if issues:
@@ -129,8 +124,7 @@ for i, tc in enumerate(test_cases, 1):
     # Update Context for next turn (Simulasi append history)
     conversation_history.append({"role": "user", "content": user_input})
     
-    # Gunakan 'note' sebagai proxy respons Asta karena tidak ada 8B model disini
-    # Di sistem asli, ini akan berisi respons final.
+    # Gunakan 'note' sebagai proxy respons Asta
     response_proxy = thought.get('note', '[Respon Asta]')
     conversation_history.append({"role": "assistant", "content": response_proxy})
     

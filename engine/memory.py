@@ -9,9 +9,7 @@ episodic_memory = EpisodicMemory(MEMORY_DIR)
 core_memory = CoreMemory(MEMORY_DIR)
 hybrid_memory = HybridMemory(episodic=episodic_memory, core=core_memory, semantic=semantic_memory)
 
-
-# ─── Semantic / Identity ──────────────────────────────────────────────────────
-
+# Semantic / Identity
 def remember_identity(key: str, value):
     semantic_memory.add_fact(key, value)
 
@@ -21,9 +19,7 @@ def get_identity(key: str):
 def get_all_identities() -> dict:
     return semantic_memory.get_all_facts()
 
-
-# ─── Episodic ─────────────────────────────────────────────────────────────────
-
+# Episodic
 def add_episodic(conversation: list, llm_summary: str = ""):
     episodic_memory.add(conversation, llm_summary=llm_summary)
 
@@ -33,18 +29,14 @@ def search_episodic(query: str, top_k: int = 3) -> list:
 def get_last_episodic_sessions(n: int = 3) -> list:
     return episodic_memory.get_last_n(n)
 
-
-# ─── Core Memory ─────────────────────────────────────────────────────────────
-
+# Core Memory
 def get_core_memory() -> str:
     return core_memory.get_summary()
 
 def save_core_memory(text: str):
     core_memory.update_summary(text, async_save=False)
 
-
-# ─── Hybrid ──────────────────────────────────────────────────────────────────
-
+# Hybrid
 def get_hybrid_memory() -> HybridMemory:
     return hybrid_memory
 
