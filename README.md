@@ -2,7 +2,7 @@
 
 > *"Artificial Sentient Thought Algorithm"*
 
-Asta adalah AI companion lokal berbasis LLM (llama.cpp) dengan arsitektur **2-pass internal thought**, sistem memori hybrid, dan manajemen emosi yang persisten. Didesain sebagai pasangan romantis personal, bukan sekadar chatbot asisten.
+Asta adalah AI companion lokal berbasis LLM (llama.cpp) dengan arsitektur **2-pass internal thought**, sistem memori hybrid, dan manajemen emosi yang persisten. Didesain sebagai pasangan personal, bukan sekadar chatbot asisten.
 
 ---
 
