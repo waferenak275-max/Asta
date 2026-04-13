@@ -67,7 +67,7 @@ User Input → [Thought Model: Pass 1 + Pass 2] → [Response Model] → Output
 │                                                         │
 │  ┌──────────────┐    ┌──────────────────────────────┐   │
 │  │ Thought Model│    │      Response Model          │   │
-│  │ (Qwen3 4B)   │───▶│  (Sailor2 8B / Qwen3 4B)    │   │
+│  │ (Qwen3 4B)   │───▶│  (Sailor2 8B / Qwen3 8B)    │   │
 │  │  Pass 1 + 2  │    │   + LoRA Adapter (opsional)  │   │
 │  └──────────────┘    └──────────────────────────────┘   │
 │                                                         │
@@ -115,6 +115,7 @@ asta-neural/
 │
 ├── model/
 │   ├── Qwen3-4B-2507/          # Model thought (GGUF + tokenizer)
+│   ├── Qwen3-8B/               # Model respons (GGUF + tokenizer)
 │   ├── Sailor2-8B/             # Model respons (GGUF + tokenizer)
 │   ├── embedding_model/        # paraphrase-multilingual-MiniLM-L12-v2
 │   └── LoRA-all-adapter/       # Adapter persona & thought (.gguf)
@@ -157,7 +158,7 @@ asta-neural/
 ### Model (unduh terpisah)
 | Model | Fungsi | Format |
 |---|---|---|
-| `Sailor2-8B-Chat-Q4_K_M.gguf` | Model respons utama | GGUF |
+| `Sailor2-8B-Chat-Q4_K_M.gguf` atau `Qwen3-8B.gguf` | Model respons utama | GGUF |
 | `Qwen3-4B-2507.gguf` | Model thought (opsional terpisah) | GGUF |
 | `paraphrase-multilingual-MiniLM-L12-v2` | Embedding memori | HuggingFace |
 
@@ -197,9 +198,12 @@ pip install sentence-transformers tavily-python
 
 ```
 model/
+├── Qwen3-8B/
+│   ├── Qwen3-8B.gguf
+│   └── tokenizer/
 ├── Sailor2-8B/
 │   ├── Sailor2-8B-Chat-Q4_K_M.gguf
-│   └── tokenizer/           ← folder tokenizer HuggingFace
+│   └── tokenizer/
 └── Qwen3-4B-2507/
     ├── Qwen3-4B-2507.gguf
     └── tokenizer/
@@ -265,15 +269,15 @@ npm run build-app
 
 ```jsonc
 {
-  "model_choice": "2",           // "1" = Qwen3 4B, "2" = Sailor2 8B
+  "model_choice": "3",           // "1" = Qwen3 4B, "2" = Sailor2 8B, "3" = Qwen3 8B
   "device": "cpu",               // "cpu" atau "gpu"
   "separate_thought_model": true, // true = pakai model 4B terpisah untuk thought
   "internal_thought_enabled": true,
-  "long_thinking_enabled": false, // aktifkan analisis mendalam
+  "long_thinking_enabled": false,
   "long_thinking_max_tokens": 1536,
   "web_search_enabled": true,
   "tavily_api_key": "...",        // opsional, untuk hasil pencarian lebih baik
-  "use_lora": false,              // gunakan LoRA adapter
+  "use_lora": true,
   "n_batch": 1024,
   "thought_n_ctx": 2048,
   "thought_max_tokens": 1024,
