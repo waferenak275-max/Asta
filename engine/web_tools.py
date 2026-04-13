@@ -55,7 +55,7 @@ def _fetch(
     except Exception:
         return None
 
-# ─── Source 1: Exchange Rate API ──────────────────────────────────────────────
+# Source 1: Exchange Rate API
 _CURRENCY_PATTERN = re.compile(
     r"\b(kurs|nilai tukar|harga|rate|berapa).{0,30}"
     r"(dolar|dollar|usd|euro|eur|yen|jpy|sgd|pound|gbp|ringgit|myr)\b",
@@ -95,7 +95,7 @@ def _get_exchange_rate(query: str, timeout: int = 5) -> str:
         pass
     return ""
 
-# ─── Source 2: Tavily Search API ──────────────────────────────────────────────
+# Source 2: Tavily Search API
 def _tavily_search(query: str, timeout: int = 7) -> str:
     api_key = _get_cfg().get("tavily_api_key", "")
     if not api_key:
@@ -130,7 +130,7 @@ def _tavily_search(query: str, timeout: int = 7) -> str:
     except Exception:
         return ""
 
-# ─── Source 3: Serper API ─────────────────────────────────────────────────────
+# Source 3: Serper API
 def _serper_search(query: str, timeout: int = 5) -> str:
     api_key = _get_cfg().get("serper_api_key", "")
     if not api_key:
@@ -163,7 +163,7 @@ def _serper_search(query: str, timeout: int = 5) -> str:
     except Exception:
         return ""
 
-# ─── Source 4: DuckDuckGo Instant Answer ─────────────────────────────────────
+# Source 4: DuckDuckGo Instant Answer
 def _ddg_instant(query: str, timeout: int = 5) -> str:
     encoded = urllib.parse.quote_plus(query)
     url     = (
@@ -187,7 +187,7 @@ def _ddg_instant(query: str, timeout: int = 5) -> str:
     except Exception:
         return ""
 
-# ─── Source 5: Wikipedia API ─────────────────────────────────────────────────
+# Source 5: Wikipedia API
 def _wikipedia_search(query: str, timeout: int = 5) -> str:
     import datetime
     if re.search(r"\b(saat ini|sekarang|terkini)\b", query, re.IGNORECASE):

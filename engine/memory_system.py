@@ -507,8 +507,8 @@ class CoreMemory(BaseMemory):
         super().__init__(
             directory / "core_memory.json",
             default_content={
-                "core_facts": "",       # fakta permanen — jarang berubah
-                "last_session": "",     # ringkasan sesi terakhir — update tiap sesi
+                "core_facts": "",
+                "last_session": "",
                 "user_profile": {},
             }
         )
@@ -651,7 +651,6 @@ class HybridMemory:
             re.IGNORECASE,
         ))
 
-        # ─── Core memory dan preferensi SELALU masuk ──────────────
         core_text = self.core.get_context_text()
         if core_text:
             parts.append(f"[Memori Inti]\n{core_text}")
@@ -660,7 +659,6 @@ class HybridMemory:
         if facts_text:
             parts.append(f"[Fakta Penting]\n{facts_text}")
 
-        # ─── Recall hanya kalau diminta ───────────────────────────
         if include_recall:
             focus = ""
             if recall_topic and recall_topic.strip().lower() not in {"", "kosong", "-"}:
@@ -677,7 +675,6 @@ class HybridMemory:
                 if recall_text:
                     parts.append(recall_text)
 
-        # ─── Semantic/web memory ──────────────────────────────────
         if self.semantic and current_query:
             semantic_hits = self.semantic.search(current_query, top_k=1)
             if semantic_hits:
@@ -704,7 +701,6 @@ class HybridMemory:
 
     def update_core_async(self, llm_callable, current_session_text: str):
         def _worker():
-            # ─── STEP 1: Selalu update last_session ───────────────────
             session_prompt = (
                 "Buat ringkasan singkat (maks 60 kata) percakapan berikut. "
                 "Fokus: topik yang dibahas, mood Adit, dan hal penting yang terjadi. "
@@ -725,7 +721,6 @@ class HybridMemory:
             except Exception as e:
                 print(f"[Core Memory] last_session update gagal: {e}")
 
-            # ─── STEP 2: Cek apakah core_facts perlu diupdate ─────────
             has_trigger  = bool(_CORE_FACT_TRIGGERS.search(current_session_text))
             score        = _score_core_importance(current_session_text)
 
@@ -735,7 +730,6 @@ class HybridMemory:
 
             print(f"[Core Memory] Trigger detected (regex={has_trigger}, score={score}) — update core_facts.")
 
-            # ─── STEP 3: Update core_facts ────────────────────────────
             old_facts = self.core.get_core_facts()
             combined  = ""
             if old_facts:
@@ -766,7 +760,6 @@ class HybridMemory:
             except Exception as e:
                 print(f"[Core Memory] core_facts update gagal: {e}")
 
-            # ─── STEP 4: Update preferensi dari sesi ini ──────────────
             try:
                 self.extract_and_save_preferences(
                     [{"role": "user", "content": current_session_text}]
